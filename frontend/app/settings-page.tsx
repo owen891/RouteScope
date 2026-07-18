@@ -95,6 +95,10 @@ export default function SettingsPage() {
   const [busyCaptchaID, setBusyCaptchaID] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState("system");
   const [versionInfo, setVersionInfo] = useState<AppVersion | null>(null);
+  const [anonProbe, setAnonProbe] = useState<
+    "unknown" | "open" | "protected" | "error"
+  >("unknown");
+  const [probingAnon, setProbingAnon] = useState(false);
 
   useEffect(() => {
     if (query.data?.config) {
@@ -107,6 +111,28 @@ export default function SettingsPage() {
       setVersionInfo(appVersion.data);
     }
   }, [appVersion.data]);
+
+  async function probeAnonymousAccess() {
+    setProbingAnon(true);
+    try {
+      // Intentionally omit Authorization to detect real API protection.
+      const res = await fetch("/api/channels", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (res.status === 401) setAnonProbe("protected");
+      else if (res.ok) setAnonProbe("open");
+      else setAnonProbe("error");
+    } catch {
+      setAnonProbe("error");
+    } finally {
+      setProbingAnon(false);
+    }
+  }
+
+  useEffect(() => {
+    void probeAnonymousAccess();
+  }, []);
 
   if (query.loading && !form) {
     return (
@@ -1220,11 +1246,43 @@ export default function SettingsPage() {
                   {form.auth.enabled ? "✓" : "!"}
                 </span>
                 <span>
-                  <strong className="text-foreground">登录鉴权</strong>
-                  ：当前 {form.auth.enabled ? "已在配置中开启" : "关闭（匿名可访问 /api）"}。
+                  <strong className="text-foreground">登录鉴权（配置）</strong>
+                  ：当前 {form.auth.enabled ? "已在配置中开启" : "关闭（配置层允许匿名）"}。
                   生产请开启并设置强密码，保存后点「应用」；同时确认 `.env` 中
                   <code className="mx-1 text-[11px]">AUTH_ENABLED=true</code>
                   与容器环境一致。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span
+                  className={
+                    anonProbe === "protected"
+                      ? "text-emerald-600"
+                      : anonProbe === "open"
+                        ? "text-amber-700"
+                        : "text-muted-foreground"
+                  }
+                >
+                  {anonProbe === "protected" ? "✓" : anonProbe === "open" ? "!" : "•"}
+                </span>
+                <span>
+                  <strong className="text-foreground">匿名 API 实测</strong>
+                  ：
+                  {anonProbe === "unknown" && "检测中…"}
+                  {anonProbe === "protected" && "未带 Token 访问 /api/channels 返回 401（受保护）"}
+                  {anonProbe === "open" &&
+                    "未带 Token 仍可访问 /api/channels（当前可匿名调用）"}
+                  {anonProbe === "error" && "探测失败，请手动检查网络"}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-2 h-6 px-2 text-[11px]"
+                    disabled={probingAnon}
+                    onClick={() => void probeAnonymousAccess()}
+                  >
+                    {probingAnon ? "检测中" : "重新检测"}
+                  </Button>
                 </span>
               </li>
               <li className="flex gap-2">
@@ -1238,12 +1296,48 @@ export default function SettingsPage() {
               <li className="flex gap-2">
                 <span className="text-muted-foreground">•</span>
                 <span>
-                  <strong className="text-foreground">备份</strong>
-                  ：升级镜像或批量改库前复制
+                  <strong className="text-foreground">备份演练</strong>
+                  ：升级前备份
                   <code className="mx-1 text-[11px]">data/upstream-ops.db</code>
                   与
                   <code className="mx-1 text-[11px]">data/config.yaml</code>
-                  。恢复时停服务后覆盖再启动。
+                  。推荐脚本
+                  <code className="mx-1 text-[11px]">./scripts/backup-data.sh backup</code>
+                  ，或复制下方命令。
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 h-7 gap-1.5 px-2 text-[11px]"
+                    onClick={async () => {
+                      const cmd = [
+                        "# 推荐：",
+                        "./scripts/backup-data.sh backup",
+                        "./scripts/backup-data.sh list",
+                        "# 恢复：./scripts/backup-data.sh restore 20260718_120000",
+                        "",
+                        "# 或手动：",
+                        "mkdir -p data/backups",
+                        "cp -a data/upstream-ops.db data/backups/upstream-ops.db.$(date +%Y%m%d_%H%M%S)",
+                        "cp -a data/config.yaml data/backups/config.yaml.$(date +%Y%m%d_%H%M%S)",
+                        "# docker compose stop app",
+                        "# cp data/backups/upstream-ops.db.XXXX data/upstream-ops.db",
+                        "# docker compose up -d",
+                      ].join("\n")
+                      try {
+                        await navigator.clipboard.writeText(cmd)
+                        toast.success("已复制备份/恢复命令到剪贴板")
+                        window.localStorage.setItem(
+                          "uh_last_backup_drill_copy",
+                          new Date().toISOString(),
+                        )
+                      } catch {
+                        toast.message(cmd)
+                      }
+                    }}
+                  >
+                    复制备份命令
+                  </Button>
                 </span>
               </li>
               <li className="flex gap-2">
@@ -1266,6 +1360,10 @@ export default function SettingsPage() {
             </ul>
             <p className="mt-3 text-[11px] text-muted-foreground">
               更完整说明见仓库 <code className="text-[11px]">docs/FORK_NOTES.md</code>。
+              {typeof window !== "undefined" &&
+              window.localStorage.getItem("uh_last_backup_drill_copy")
+                ? ` 最近复制备份命令：${window.localStorage.getItem("uh_last_backup_drill_copy")}`
+                : ""}
             </p>
           </SectionCard>
 
