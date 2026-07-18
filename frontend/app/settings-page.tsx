@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  Download,
+  HardDrive,
   Bell,
   Clock3,
   MonitorCog,
@@ -52,6 +54,7 @@ import {
   useSystemConfig,
 } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { formatNotifyTestError } from "@/lib/notify-test-error";
 
 function num(v: string) {
   return Number(v || 0);
@@ -158,11 +161,14 @@ export default function SettingsPage() {
       if (res.ok) {
         toast.success(`已发送测试消息到 ${channel.name}`);
       } else {
-        toast.error(res.error ?? "测试失败");
+        toast.error(
+          formatNotifyTestError(channel.type, res.error ?? "测试失败"),
+        );
       }
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "测试失败");
+      const raw = err instanceof Error ? err.message : "测试失败";
+      toast.error(formatNotifyTestError(channel.type, raw));
     } finally {
       setBusyNotificationID(null);
     }
@@ -208,6 +214,10 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
+    if (form?.auth.enabled && !String(form.auth.password || "").trim()) {
+      // 后端可能已有哈希密码；仅当用户刚打开鉴权且密码框为空时警告，不阻断已有密码场景
+      toast.warning("已启用鉴权：若是首次开启，请填写管理员密码后再保存")
+    }
     setSaving(true);
     try {
       await apiFetch("/settings/config", {
@@ -329,6 +339,19 @@ export default function SettingsPage() {
                 description="控制页面标题和通知标题前缀。"
               >
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "border-transparent",
+                      form.auth.enabled
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-800",
+                    )}
+                  >
+                    {form.auth.enabled
+                      ? `鉴权已开启 · 用户 ${form.auth.username || "admin"}`
+                      : "鉴权已关闭 · 所有 /api 可匿名访问"}
+                  </Badge>
                   <Badge variant="outline" className="border-border bg-background">
                     当前版本 {versionInfo?.version || "加载中"}
                   </Badge>
@@ -426,9 +449,16 @@ export default function SettingsPage() {
                     )
                   }
                 />
-                <NoteBox title="热应用说明">
-                  应用后新的鉴权配置立即生效，现有无效令牌会在后续请求时被拦截。
-                </NoteBox>
+                {form.auth.enabled ? (
+                  <NoteBox title="热应用说明">
+                    应用后新的鉴权配置立即生效。请先填写管理员密码再保存并应用；仅改配置文件而容器
+                    环境变量 AUTH_ENABLED 未开时，部分部署仍可能匿名访问 API，请以实际登录页为准。
+                  </NoteBox>
+                ) : (
+                  <NoteBox title="安全风险">
+                    当前鉴权关闭，所有 /api 可匿名访问。仅建议本机调试；对外暴露前请开启鉴权、设置强密码，并保存后点击「应用」。
+                  </NoteBox>
+                )}
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <Field
@@ -1097,6 +1127,88 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
+          <SectionCard
+            icon={<HardDrive className="size-4 text-slate-600" />}
+            title="数据与备份"
+            description="渠道、会话、快照等保存在数据目录；配置文件路径见页面顶部。生产环境请定期备份。"
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <NoteBox title="建议备份内容">
+                <ul className="mt-1 list-disc space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                  <li>
+                    <code className="text-[11px]">data/upstream-ops.db</code>
+                    （及可选的 <code className="text-[11px]">-wal/-shm</code>）
+                  </li>
+                  <li>
+                    <code className="text-[11px]">data/config.yaml</code>
+                  </li>
+                  <li>
+                    Docker 示例：
+                    <code className="mt-1 block whitespace-pre-wrap break-all text-[11px]">
+                      docker compose exec app wget -q -O- http://localhost:8418/healthz
+                    </code>
+                    停机或热拷贝 <code className="text-[11px]">./data</code> 目录即可。
+                  </li>
+                </ul>
+              </NoteBox>
+              <div className="space-y-3">
+                <NoteBox title="当前部署">
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    配置路径：
+                    <span className="font-mono text-[11px] text-foreground">
+                      {query.data?.config_path ?? "—"}
+                    </span>
+                    <br />
+                    鉴权状态：
+                    <span className="font-medium text-foreground">
+                      {form.auth.enabled ? "已开启" : "已关闭（仅建议本机）"}
+                    </span>
+                  </p>
+                </NoteBox>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => {
+                    const payload = {
+                      exported_at: new Date().toISOString(),
+                      config_path: query.data?.config_path ?? null,
+                      // 不导出密码与 tokenSecret
+                      config: {
+                        ...form,
+                        auth: {
+                          ...form.auth,
+                          password: "",
+                          tokenSecret: "",
+                        },
+                        proxy: {
+                          ...form.proxy,
+                          password: "",
+                        },
+                      },
+                    }
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+                      type: "application/json",
+                    })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.download = `upstream-ops-config-${new Date()
+                      .toISOString()
+                      .slice(0, 10)}.json`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                    toast.success("已下载脱敏配置（不含密码）")
+                  }}
+                >
+                  <Download className="size-3.5" />
+                  下载脱敏配置 JSON
+                </Button>
+              </div>
+            </div>
+          </SectionCard>
+
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
             <Button onClick={handleSave} disabled={saving || applying}>
               {saving ? "保存中..." : "保存"}
@@ -1593,6 +1705,7 @@ function typeLabel(type: NotificationChannelType) {
     dingtalk: "钉钉",
     feishu: "飞书",
     serverchan3: "Server酱³",
+    qqbot: "QQ 机器人",
   };
   return map[type] ?? type;
 }
@@ -1622,6 +1735,7 @@ function notifyIcon(type: NotificationChannelType) {
     dingtalk: Send,
     feishu: Send,
     serverchan3: Send,
+    qqbot: Send,
   };
   return map[type] ?? Send;
 }

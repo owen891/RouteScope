@@ -34,6 +34,7 @@ import {
   useNotificationLogs,
 } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
+import { formatNotifyTestError } from "@/lib/notify-test-error"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, dateTime, decimal, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -668,6 +669,7 @@ const notifyTypeIcon: Partial<Record<NotificationChannelType, LucideIcon>> = {
   dingtalk: Send,
   feishu: Send,
   serverchan3: Send,
+  qqbot: Send,
 }
 
 export function NotificationStatus() {
@@ -714,12 +716,12 @@ export function NotificationStatus() {
       if (res.ok) {
         toast.success(`已发送测试消息到 ${c.name}`)
       } else {
-        toast.error(`测试失败：${res.error ?? "未知错误"}`)
+        toast.error(formatNotifyTestError(c.type, res.error ?? "未知错误"))
       }
       refresh()
     } catch (e) {
       const err = e as Error
-      toast.error(err.message || "测试失败")
+      toast.error(formatNotifyTestError(c.type, err.message || "测试失败"))
     } finally {
       setBusy(null)
     }
