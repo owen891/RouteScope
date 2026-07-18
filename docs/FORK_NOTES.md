@@ -58,11 +58,15 @@ docker compose up -d
 | 功能 | 入口 |
 |------|------|
 | 导入 all-api-hub | 监控页渠道栏「导入」 |
-| 更新已有 | 导入弹窗重名策略选「更新已有渠道凭据」（名称或 site_url 匹配） |
-| 失败筛选 / 同步失败 | 渠道栏下拉与按钮 |
-| 改密码 / 重贴 Token | 失败卡片快捷按钮 |
+| 更新已有 | 导入默认「更新」；名称或 site_url 匹配 |
+| 仅同步本次写入 | 导入完成后勾选「同步本次写入」 |
+| 失败筛选 / 同步失败 / 失败优先 | 渠道栏下拉、按钮；默认列表失败置顶 |
+| 批量改密码 | 失败筛选后批量操作 |
+| 改密码 / 重贴 Token / 打码 | 失败卡片快捷按钮；Turnstile 深链验证码页 |
+| 备注 / 标签 | 卡片展示 `login_extra_params` 中 notes/tagIds/source |
+| 紧凑密度 | 渠道栏「紧凑 / 舒适」切换（localStorage） |
 | QQ 机器人 | 设置 → 通知渠道 → 类型「QQ 机器人 (OneBot)」 |
-| 备份说明 | 设置 → 系统设置 →「数据与备份」 |
+| 生产检查 / 备份 | 设置 →「生产检查清单」；`scripts/backup-data.sh` |
 
 ### QQ 机器人（Docker 注意）
 
@@ -74,23 +78,48 @@ docker compose up -d
 ## 生产建议
 
 1. `.env`：`AUTH_ENABLED=true`，设置强 `ADMIN_PASSWORD` / `AUTH_TOKEN_SECRET`
-2. 定期复制 `data/upstream-ops.db` 与 `data/config.yaml`
+2. 定期备份 `data/upstream-ops.db` 与 `data/config.yaml`
 3. 升级前先备份 `data/`，再换镜像
 
-设置页提供 **生产检查清单**、鉴权开关与「数据与备份」说明。可开关鉴权并「保存 + 应用」；若 compose 环境变量与 config 不一致，以实际是否出现登录页为准。
+设置页提供 **生产检查清单**（含匿名 API 实测、备份命令复制）、鉴权开关与「数据与备份」说明。可开关鉴权并「保存 + 应用」；若 compose 环境变量与 config 不一致，以清单里「匿名 API 实测」和是否出现登录页为准。
+
+### 开启鉴权（推荐流程）
+
+```bash
+# 打印建议写入 .env 的鉴权段落（不会自动改文件，避免锁死）
+./scripts/print-auth-env.sh
+# 或指定密码：
+./scripts/print-auth-env.sh 'YourStrongPass'
+
+# 粘贴到 .env 后：
+docker compose up -d --force-recreate
+
+# 再在 UI：设置 → 登录鉴权 → 启用 → 同一密码 → 保存 → 应用
+# 验证：未登录访问 /api/channels 应 401；设置页「匿名 API 实测」为受保护
+```
 
 ### 备份 / 恢复演练（建议做一次）
 
 ```bash
-# 备份
+# 备份（含可选 wal/shm）
+./scripts/backup-data.sh backup
+./scripts/backup-data.sh list
+
+# 恢复（脚本会 stop app → 覆盖 → up）
+./scripts/backup-data.sh restore 20260718_120000
+```
+
+等价手搓命令：
+
+```bash
 mkdir -p data/backups
 cp -a data/upstream-ops.db data/backups/upstream-ops.db.$(date +%Y%m%d_%H%M%S)
 cp -a data/config.yaml data/backups/config.yaml.$(date +%Y%m%d_%H%M%S)
 
-# 恢复（先停服务）
 docker compose stop app
 cp data/backups/upstream-ops.db.XXXX data/upstream-ops.db
 cp data/backups/config.yaml.XXXX data/config.yaml
+rm -f data/upstream-ops.db-wal data/upstream-ops.db-shm
 docker compose up -d
 ```
 
@@ -105,12 +134,20 @@ go test ./backend/notify/ -count=1
 
 ## 与官方差异（概要）
 
-- 前端：导入、错误分类、筛选、设置备份/鉴权提示、QQ 表单
+- 前端：导入/更新、错误分类、筛选、批量改密、备注标签、紧凑列表、设置生产检查/备份提示、QQ 表单
 - 后端：`notify/qqbot` + `NotifyQQBot` 类型
-- 工程：vitest、本地 build 脚本、本说明
+- 工程：vitest、`scripts/build-local.*`、`scripts/backup-data.sh`、`scripts/print-auth-env.sh`、本说明
 
-合并官方新版本：fetch tag → 解决冲突 → `./scripts/build-local.sh` → 备份 data 后 `docker compose up -d`。
+合并官方新版本：fetch tag → 解决冲突 → `./scripts/backup-data.sh backup` → `./scripts/build-local.sh` → `docker compose up -d`。
 
-## Ops 脚本（不进运行时）
+## 仓库内 Ops 脚本
+
+| 脚本 | 用途 |
+|------|------|
+| `scripts/build-local.sh` / `.ps1` | 复现 `upstream-ops:local` |
+| `scripts/backup-data.sh` | `backup` / `list` / `restore <ts>` |
+| `scripts/print-auth-env.sh` | 打印建议鉴权 `.env` 段落（不自动写入） |
+
+## 仓外脚本（不进运行时 / 勿提交密钥）
 
 `data/` 下可能存在本地脚本（如 `import_backup.py`、`extract_quark_tokens.py`），仅离线使用，**不要**提交含 token 的 JSON/DB。
