@@ -254,8 +254,27 @@ func Save(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(path, body, 0o644); err != nil {
+
+	// Open without truncating so an existing permissive file is restricted
+	// before any new secret-bearing content is written.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("open config: %w", err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("chmod config: %w", err)
+	}
+	if err := f.Truncate(0); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("truncate config: %w", err)
+	}
+	if _, err := f.Write(body); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close config: %w", err)
 	}
 	return nil
 }

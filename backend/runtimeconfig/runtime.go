@@ -119,7 +119,7 @@ func (m *Manager) ApplyFromFile() (*ApplyResult, error) {
 	oldScheduler := m.scheduler
 	m.mu.RUnlock()
 
-	cfg, err := config.LoadFile(path)
+	cfg, err := config.Load(path)
 	if err != nil {
 		return nil, err
 	}
