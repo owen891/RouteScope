@@ -104,16 +104,36 @@ Deferred until after the first local-ops release.
 
 ## Traceability
 
-Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| IMPT-01 | Phase 2 | Pending |
+| IMPT-02 | Phase 2 | Pending |
+| IMPT-03 | Phase 2 | Pending |
+| IMPT-04 | Phase 2 | Pending |
+| FAIL-01 | Phase 2 | Pending |
+| FAIL-02 | Phase 2 | Pending |
+| FAIL-03 | Phase 2 | Pending |
+| QQNT-01 | Phase 2 | Pending |
+| QQNT-02 | Phase 2 | Pending |
+| SECU-01 | Phase 1 | Pending |
+| SECU-02 | Phase 1 | Pending |
+| SECU-03 | Phase 1 | Pending |
+| RECV-01 | Phase 3 | Pending |
+| RECV-02 | Phase 3 | Pending |
+| RECV-03 | Phase 3 | Pending |
+| QUAL-01 | Phase 1 | Pending |
+| QUAL-02 | Phase 1 | Pending |
+| QUAL-03 | Phase 1 | Pending |
+| QUAL-04 | Phase 3 | Pending |
+| RELS-01 | Phase 4 | Pending |
+| RELS-02 | Phase 4 | Pending |
+| RELS-03 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22
+- Mapped to phases: 22
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-18*
-*Last updated: 2026-07-18 after initial definition*
+*Last updated: 2026-07-18 after roadmap creation*
