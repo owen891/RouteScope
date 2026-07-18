@@ -133,6 +133,24 @@ describe("formatNotifyTestError", () => {
   })
 })
 
+describe("parseChannelExtra", () => {
+  it("reads notes and tags from login_extra_params", async () => {
+    const { parseChannelExtra } = await import("./channel-extra")
+    const meta = parseChannelExtra(
+      JSON.stringify({
+        source: "all-api-hub",
+        notes_preview: "备注一行",
+        tagIds: ["vip", "main"],
+        import_decision: { used_notes_password: true, has_refresh: false },
+      }),
+    )
+    expect(meta.source).toBe("all-api-hub")
+    expect(meta.notesPreview).toBe("备注一行")
+    expect(meta.tagIds).toEqual(["vip", "main"])
+    expect(meta.usedNotesPassword).toBe(true)
+  })
+})
+
 describe("classifyChannelError", () => {
   it("classifies fingerprint", () => {
     const r = classifyChannelError("Session network fingerprint changed")
