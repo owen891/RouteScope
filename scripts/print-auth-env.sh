@@ -5,20 +5,37 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+random_hex() {
+  local byte_count="$1"
+  local value=""
+
+  if command -v openssl >/dev/null 2>&1; then
+    if ! value="$(openssl rand -hex "$byte_count")"; then
+      echo "unable to generate credentials: openssl random generation failed" >&2
+      return 1
+    fi
+  elif [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+    if ! value="$(od -An -N "$byte_count" -tx1 /dev/urandom | tr -d '[:space:]')"; then
+      echo "unable to generate credentials: /dev/urandom read failed" >&2
+      return 1
+    fi
+  else
+    echo "unable to generate credentials: no cryptographic random source is available" >&2
+    return 1
+  fi
+
+  if [[ ! "$value" =~ ^[0-9a-fA-F]+$ ]] || (( ${#value} != byte_count * 2 )); then
+    echo "unable to generate credentials: cryptographic random source returned invalid data" >&2
+    return 1
+  fi
+  printf '%s' "$value"
+}
+
 pass="${1:-}"
 if [[ -z "$pass" ]]; then
-  # generate a random password suggestion
-  if command -v openssl >/dev/null 2>&1; then
-    pass="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
-  else
-    pass="ChangeMe-$(date +%s)"
-  fi
+  pass="$(random_hex 16)"
 fi
-
-token_secret=""
-if command -v openssl >/dev/null 2>&1; then
-  token_secret="$(openssl rand -hex 24)"
-fi
+token_secret="$(random_hex 32)"
 
 cat <<EOF
 # --- paste into .env then: docker compose up -d --force-recreate ---
