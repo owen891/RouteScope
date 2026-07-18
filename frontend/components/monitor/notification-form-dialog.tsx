@@ -110,7 +110,8 @@ function emptyConfig(): ConfigState {
     secret: "",
     serverchan3_uid: "",
     serverchan3_sendkey: "",
-    qq_base_url: "http://127.0.0.1:5700",
+    // Docker 内访问宿主机机器人的默认值；本机非 Docker 可改回 127.0.0.1
+    qq_base_url: "http://host.docker.internal:5700",
     qq_access_token: "",
     qq_message_type: "group",
     qq_group_id: "",
@@ -759,15 +760,20 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
         <p className="text-xs font-medium text-muted-foreground">QQ 机器人（OneBot HTTP）</p>
         <p className="text-[11px] leading-4 text-muted-foreground">
           兼容 go-cqhttp / NapCat / Lagrange.OneBot 等 OneBot HTTP API。
-          UpstreamOps 在 Docker 中时，不要填 127.0.0.1（那是容器自身）；
-          Windows Docker Desktop 可用 <code className="text-[10px]">http://host.docker.internal:端口</code>，
-          或填宿主机局域网 IP。保存后点渠道列表的「测试」验证。
+          默认按「UpstreamOps 在 Docker、机器人在宿主机」填写
+          <code className="mx-1 text-[10px]">http://host.docker.internal:5700</code>
+          （Windows/Mac Docker Desktop）。
+          若本机直接跑二进制请改
+          <code className="mx-1 text-[10px]">http://127.0.0.1:端口</code>
+          ；Linux 容器常用宿主机局域网 IP 或
+          <code className="mx-1 text-[10px]">172.17.0.1</code>
+          。保存后点渠道列表的「测试」验证。
         </p>
         <div className="space-y-1.5">
           <Label htmlFor="qq-base">HTTP API 地址</Label>
           <Input
             id="qq-base"
-            placeholder="http://127.0.0.1:5700"
+            placeholder="http://host.docker.internal:5700"
             value={cfg.qq_base_url}
             onChange={(e) => updateCfg({ qq_base_url: e.target.value })}
             required={!isEdit}

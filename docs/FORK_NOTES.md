@@ -70,10 +70,15 @@ docker compose up -d
 
 ### QQ 机器人（Docker 注意）
 
-机器人在宿主机、UpstreamOps 在容器时，`base_url` **不要**填 `http://127.0.0.1:端口`。
+新建 QQ 渠道时表单默认 `http://host.docker.internal:5700`（假定容器访问宿主机机器人）。
 
-- Docker Desktop (Windows/Mac)：`http://host.docker.internal:5700`（端口按你的 NapCat/go-cqhttp 为准）
-- Linux：常用宿主机局域网 IP，或 `172.17.0.1`
+| 部署 | base_url 建议 |
+|------|----------------|
+| Ops 在 Docker Desktop，机器人在宿主机 | `http://host.docker.internal:5700` |
+| Ops 本机二进制，机器人本机 | `http://127.0.0.1:5700` |
+| Linux 容器 → 宿主机 | 宿主机局域网 IP 或 `http://172.17.0.1:5700` |
+
+**不要**在 Docker 内填 `127.0.0.1`（那是容器自身）。实测矩阵：群/私聊 × NapCat 或 go-cqhttp，以设置页「测试」通过为准。
 
 ## 生产建议
 
