@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useRef } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { toast } from "sonner"
 import { FileUp, Loader2, Upload } from "lucide-react"
 import {
@@ -35,13 +35,19 @@ import {
 } from "@/lib/all-api-hub-import"
 import { channelTypeLabel } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { syncAllChannelsStream } from "@/lib/sync-stream"
+import { syncAllChannelsStream, syncChannelStream } from "@/lib/sync-stream"
 
 interface ChannelImportDialogProps {
   open: boolean
   onOpenChange: (v: boolean) => void
   /** 导入并可选同步后回调（用于父级切到失败筛选等） */
-  onFinished?: (result: { imported: number; failed: number; synced: boolean }) => void
+  onFinished?: (result: {
+    imported: number
+    failed: number
+    synced: boolean
+    /** Channel IDs successfully created or updated in this run */
+    writtenIds: number[]
+  }) => void
 }
 
 type RowResult = {
@@ -66,6 +72,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
   const [allowNotesPassword, setAllowNotesPassword] = useState(true)
   const [allowExpiredToken, setAllowExpiredToken] = useState(true)
   const [syncAfter, setSyncAfter] = useState(false)
+  const [syncOnlyWritten, setSyncOnlyWritten] = useState(true)
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [results, setResults] = useState<RowResult[] | null>(null)
@@ -89,6 +96,14 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
     }
     return m
   }, [channels])
+
+  // Prefer "update existing" when the library already has channels.
+  useEffect(() => {
+    if (!open) return
+    if ((channels?.length ?? 0) > 0) {
+      setNameConflict((prev) => (prev === "rename" ? "update" : prev))
+    }
+  }, [open, channels?.length])
 
   const importable = useMemo(
     () => rows.filter((r) => r.payload && !r.error && !r.skip),
@@ -242,26 +257,58 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
 
     refresh()
 
+    const writtenIds = out
+      .filter((r) => r.ok && r.id != null)
+      .map((r) => r.id as number)
+
     let synced = false
     if (syncAfter && okN > 0) {
-      toast.message("开始同步全部渠道…")
       try {
-        await syncAllChannelsStream({
-          onEvent: (ev) => {
-            if (ev.channel_id == null && (ev.stage === "done" || ev.stage === "error")) {
-              if (ev.stage === "done") toast.success(ev.message)
-              else toast.error(ev.message)
+        if (syncOnlyWritten && writtenIds.length > 0) {
+          toast.message(`开始同步本次写入的 ${writtenIds.length} 个渠道…`)
+          let syncFail = 0
+          for (let i = 0; i < writtenIds.length; i++) {
+            const id = writtenIds[i]
+            let sawError = false
+            try {
+              await syncChannelStream(id, {
+                onEvent: (ev) => {
+                  if (ev.stage === "error" || ev.ok === false) sawError = true
+                },
+              })
+              if (sawError) syncFail += 1
+            } catch {
+              syncFail += 1
             }
-          },
-        })
-        synced = true
+            setProgress({ done: i + 1, total: writtenIds.length })
+          }
+          synced = true
+          if (syncFail > 0) {
+            toast.message(
+              `本次写入同步完成：成功 ${writtenIds.length - syncFail}，失败 ${syncFail}`,
+            )
+          } else {
+            toast.success(`本次写入的 ${writtenIds.length} 个渠道已同步`)
+          }
+        } else {
+          toast.message("开始同步全部渠道…")
+          await syncAllChannelsStream({
+            onEvent: (ev) => {
+              if (ev.channel_id == null && (ev.stage === "done" || ev.stage === "error")) {
+                if (ev.stage === "done") toast.success(ev.message)
+                else toast.error(ev.message)
+              }
+            },
+          })
+          synced = true
+        }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "同步失败")
       }
       refresh()
     }
 
-    onFinished?.({ imported: okN, failed: failN, synced })
+    onFinished?.({ imported: okN, failed: failN, synced, writtenIds })
     setImporting(false)
   }
 
@@ -374,8 +421,18 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
                 />
               </label>
               <label className="flex items-center justify-between gap-2 text-xs">
-                <span>导入后同步全部</span>
+                <span>导入后同步</span>
                 <Switch checked={syncAfter} disabled={importing} onCheckedChange={setSyncAfter} />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-xs">
+                <span className={cn(!syncAfter && "text-muted-foreground")}>
+                  仅同步本次写入
+                </span>
+                <Switch
+                  checked={syncOnlyWritten}
+                  disabled={importing || !syncAfter}
+                  onCheckedChange={setSyncOnlyWritten}
+                />
               </label>
             </div>
           </div>

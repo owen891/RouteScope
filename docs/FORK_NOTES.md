@@ -77,7 +77,24 @@ docker compose up -d
 2. 定期复制 `data/upstream-ops.db` 与 `data/config.yaml`
 3. 升级前先备份 `data/`，再换镜像
 
-设置页可开关鉴权并「保存 + 应用」；若 compose 环境变量与 config 不一致，以实际是否出现登录页为准。
+设置页提供 **生产检查清单**、鉴权开关与「数据与备份」说明。可开关鉴权并「保存 + 应用」；若 compose 环境变量与 config 不一致，以实际是否出现登录页为准。
+
+### 备份 / 恢复演练（建议做一次）
+
+```bash
+# 备份
+mkdir -p data/backups
+cp -a data/upstream-ops.db data/backups/upstream-ops.db.$(date +%Y%m%d_%H%M%S)
+cp -a data/config.yaml data/backups/config.yaml.$(date +%Y%m%d_%H%M%S)
+
+# 恢复（先停服务）
+docker compose stop app
+cp data/backups/upstream-ops.db.XXXX data/upstream-ops.db
+cp data/backups/config.yaml.XXXX data/config.yaml
+docker compose up -d
+```
+
+UI 还可下载**脱敏配置 JSON**（不含密码），便于存档非密钥配置。
 
 ## 测试
 
