@@ -24,6 +24,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   XCircle,
+  FileUp,
 } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -57,14 +58,20 @@ import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, decimal, formatRatio, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncAllChannelsStream, syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
-import type { Channel, ChannelRedeemResult, RateSnapshot } from "@/lib/api-types"
+import type { Channel, ChannelRedeemResult, CredentialMode, RateSnapshot } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
+import { ChannelImportDialog } from "@/components/monitor/channel-import-dialog"
 import { ChannelRedeemDialog } from "@/components/monitor/channel-redeem-dialog"
 import { ChannelRechargeDialog } from "@/components/monitor/channel-recharge-dialog"
 import { ChannelAPIKeysDialog } from "@/components/monitor/channel-api-keys-dialog"
 import {
   ChannelSubscriptionUsageMetricTiles,
 } from "@/components/monitor/channel-subscription-usage-dialog"
+import {
+  CHANNEL_ERROR_FILTERS,
+  classifyChannelError,
+  type ChannelErrorKind,
+} from "@/lib/channel-error"
 
 type Status = "healthy" | "low" | "failed" | "idle"
 type ChannelPageSize = 9 | 18 | 36 | 72 | 81 | "all"
@@ -90,6 +97,11 @@ const statusMap: Record<Status, { label: string; cls: string }> = {
   low: { label: "低余额", cls: "text-warning bg-warning/10" },
   failed: { label: "登录失败", cls: "text-danger bg-danger/10" },
   idle: { label: "尚未采集", cls: "text-muted-foreground bg-muted/40" },
+}
+
+function failedStatusLabel(c: Channel): string {
+  const info = classifyChannelError(c.last_error)
+  return info.kind === "none" || info.kind === "other" ? "登录失败" : info.label
 }
 
 function StatTile({ label, children }: { label: string; children: React.ReactNode }) {
@@ -525,7 +537,47 @@ export function ChannelCards() {
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
   const [creating, setCreating] = useState(false)
+  const [preferCredentialMode, setPreferCredentialMode] = useState<CredentialMode | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
+  const [errorFilter, setErrorFilter] = useState<"all" | "failed" | ChannelErrorKind>(() => {
+    if (typeof window === "undefined") return "all"
+    try {
+      const raw = window.localStorage.getItem("uh_channel_error_filter")
+      if (!raw) return "all"
+      if (raw === "all" || raw === "failed") return raw
+      if (
+        ["fingerprint", "token_expired", "turnstile", "bad_password", "network", "other"].includes(
+          raw,
+        )
+      ) {
+        return raw as ChannelErrorKind
+      }
+    } catch {
+      /* ignore */
+    }
+    return "all"
+  })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("uh_channel_error_filter", errorFilter)
+    } catch {
+      /* ignore */
+    }
+  }, [errorFilter])
+
+  function openCreate() {
+    setEditing(null)
+    setPreferCredentialMode(null)
+    setCreating(true)
+  }
+
+  function openEdit(channel: Channel, mode?: CredentialMode | null) {
+    setEditing(channel)
+    setPreferCredentialMode(mode ?? null)
+    setCreating(true)
+  }
   const [redeeming, setRedeeming] = useState<Channel | null>(null)
   const [recharging, setRecharging] = useState<Channel | null>(null)
   const [managingKeys, setManagingKeys] = useState<Channel | null>(null)
@@ -535,9 +587,24 @@ export function ChannelCards() {
   const [bulkSync, setBulkSync] = useState<BulkSyncState>({ running: false, completed: 0, total: 0 })
   const anySyncRunning = bulkSync.running || Object.values(syncState).some((s) => s.running)
   const channelPage = pageQuery.data
-  const visibleChannels = channelPage?.items ?? []
-  const totalChannels = channelPage?.total ?? 0
-  const pageSizeAll = pageSize === "all"
+  const allChannels = channels ?? []
+  const failedChannels = useMemo(
+    () => allChannels.filter((c) => Boolean(c.last_error)),
+    [allChannels],
+  )
+  const filteredByError = useMemo(() => {
+    if (errorFilter === "all") return null
+    if (errorFilter === "failed") return failedChannels
+    return failedChannels.filter((c) => classifyChannelError(c.last_error).kind === errorFilter)
+  }, [errorFilter, failedChannels])
+  const filterActive = filteredByError != null
+  const visibleChannels = filterActive
+    ? filteredByError
+    : (channelPage?.items ?? [])
+  const totalChannels = filterActive
+    ? filteredByError.length
+    : (channelPage?.total ?? 0)
+  const pageSizeAll = pageSize === "all" || filterActive
   const totalPages = pageSizeAll ? 1 : (channelPage?.pages ?? 1)
   const currentPage = pageSizeAll ? 1 : Math.min(page, totalPages)
   const effectivePageSize = pageSizeAll ? Math.max(totalChannels, 1) : pageSize
@@ -637,11 +704,87 @@ export function ChannelCards() {
     }
   }
 
-  async function startBulkSync() {
-    const list = channels ?? []
-    if (list.length === 0) return
+  async function startBulkSync(onlyFailed = false) {
+    const list = onlyFailed
+      ? (errorFilter !== "all" && filteredByError
+          ? filteredByError
+          : failedChannels)
+      : (channels ?? [])
+    if (list.length === 0) {
+      toast.message(onlyFailed ? "没有失败渠道可同步" : "没有渠道可同步")
+      return
+    }
 
-    for (const channel of list) {
+    // 全量：走后端 sync-all；仅失败：逐渠道串行同步，避免无筛选 API
+    if (!onlyFailed) {
+      for (const channel of list) {
+        clearHideTimer(channel.id)
+        patchSync(channel.id, () => ({
+          running: true,
+          events: [],
+          latest: null,
+          finalOk: null,
+          fading: false,
+        }))
+      }
+
+      setBulkSync({ running: true, completed: 0, total: list.length })
+      try {
+        await syncAllChannelsStream({
+          onEvent: (ev) => {
+            if (ev.channel_id != null) {
+              patchSync(ev.channel_id, (prev) => ({
+                ...prev,
+                events: [...prev.events, ev],
+                latest: ev,
+                running: ev.stage !== "done" && ev.stage !== "error",
+                finalOk: ev.stage === "done" ? true : ev.stage === "error" ? false : prev.finalOk,
+                fading: false,
+              }))
+              if (ev.stage === "done") {
+                scheduleHide(ev.channel_id)
+              }
+            }
+
+            if (ev.index != null && ev.total != null) {
+              setBulkSync((prev) => ({
+                ...prev,
+                completed: Math.max(prev.completed, ev.index ?? prev.completed),
+                total: ev.total ?? prev.total,
+              }))
+            }
+
+            if (ev.channel_id == null && (ev.stage === "done" || ev.stage === "error")) {
+              if (ev.stage === "done") {
+                toast.success(ev.message)
+              } else {
+                toast.error(ev.message)
+              }
+            }
+          },
+        })
+      } catch (e) {
+        const err = e as Error
+        toast.error(err.message || "批量同步失败")
+      } finally {
+        setSyncState((s) => {
+          const next: Record<number, ChannelSyncState> = {}
+          for (const [id, state] of Object.entries(s)) {
+            next[Number(id)] = { ...state, running: false }
+          }
+          return next
+        })
+        setBulkSync((prev) => ({ ...prev, running: false }))
+        refresh()
+      }
+      return
+    }
+
+    setBulkSync({ running: true, completed: 0, total: list.length })
+    let okN = 0
+    let failN = 0
+    for (let i = 0; i < list.length; i++) {
+      const channel = list[i]
       clearHideTimer(channel.id)
       patchSync(channel.id, () => ({
         running: true,
@@ -650,56 +793,52 @@ export function ChannelCards() {
         finalOk: null,
         fading: false,
       }))
-    }
-
-    setBulkSync({ running: true, completed: 0, total: list.length })
-    try {
-      await syncAllChannelsStream({
-        onEvent: (ev) => {
-          if (ev.channel_id != null) {
-            patchSync(ev.channel_id, (prev) => ({
+      let sawError = false
+      try {
+        await syncChannelStream(channel.id, {
+          onEvent: (ev) => {
+            if (ev.stage === "error" || ev.ok === false) sawError = true
+            patchSync(channel.id, (prev) => ({
               ...prev,
               events: [...prev.events, ev],
               latest: ev,
-              running: ev.stage !== "done" && ev.stage !== "error",
-              finalOk: ev.stage === "done" ? true : ev.stage === "error" ? false : prev.finalOk,
-              fading: false,
             }))
-            if (ev.stage === "done") {
-              scheduleHide(ev.channel_id)
-            }
-          }
-
-          if (ev.index != null && ev.total != null) {
-            setBulkSync((prev) => ({
-              ...prev,
-              completed: Math.max(prev.completed, ev.index ?? prev.completed),
-              total: ev.total ?? prev.total,
-            }))
-          }
-
-          if (ev.channel_id == null && (ev.stage === "done" || ev.stage === "error")) {
-            if (ev.stage === "done") {
-              toast.success(ev.message)
-            } else {
-              toast.error(ev.message)
-            }
-          }
-        },
-      })
-    } catch (e) {
-      const err = e as Error
-      toast.error(err.message || "批量同步失败")
-    } finally {
-      setSyncState((s) => {
-        const next: Record<number, ChannelSyncState> = {}
-        for (const [id, state] of Object.entries(s)) {
-          next[Number(id)] = { ...state, running: false }
-        }
-        return next
-      })
-      setBulkSync((prev) => ({ ...prev, running: false }))
-      refresh()
+          },
+        })
+        const ok = !sawError
+        if (ok) okN += 1
+        else failN += 1
+        patchSync(channel.id, (prev) => ({
+          ...prev,
+          running: false,
+          finalOk: ok,
+        }))
+        if (ok) scheduleHide(channel.id)
+      } catch (e) {
+        failN += 1
+        const err = e as Error
+        patchSync(channel.id, (prev) => ({
+          ...prev,
+          running: false,
+          finalOk: false,
+          latest: {
+            stage: "error",
+            message: err.message || "同步失败",
+            time: new Date().toISOString(),
+          },
+        }))
+      }
+      setBulkSync((prev) => ({ ...prev, completed: i + 1, total: list.length }))
+    }
+    setBulkSync((prev) => ({ ...prev, running: false }))
+    toast.message(`失败项同步完成：成功 ${okN}，失败 ${failN}`)
+    refresh()
+    // 仍有失败则保持/切到失败筛选，方便继续处理
+    if (failN > 0) {
+      setErrorFilter((prev) => (prev === "all" ? "failed" : prev))
+      setPage(1)
+    } else if (okN > 0) {
+      setErrorFilter("all")
     }
   }
 
@@ -739,35 +878,73 @@ export function ChannelCards() {
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <span className="text-xs text-muted-foreground">
-            {totalChannels}{" 个渠道"}
+            {filterActive
+              ? `筛选 ${totalChannels} / 全部 ${allChannels.length}`
+              : `${totalChannels} 个渠道`}
+            {failedChannels.length > 0 ? ` · 失败 ${failedChannels.length}` : ""}
           </span>
+          <Select
+            value={errorFilter}
+            onValueChange={(v) => {
+              setErrorFilter(v as typeof errorFilter)
+              setPage(1)
+            }}
+          >
+            <SelectTrigger className="h-8 w-[140px] text-xs">
+              <SelectValue placeholder="状态筛选" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="all">全部渠道</SelectItem>
+              {CHANNEL_ERROR_FILTERS.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
             disabled={anySyncRunning}
-            onClick={() => void startBulkSync()}
+            onClick={() => void startBulkSync(false)}
           >
             <RefreshCw className={cn("size-3.5", bulkSync.running && "animate-spin")} />
-            {bulkSync.running ? `同步中 ${bulkSync.completed}/${bulkSync.total}` : "同步"}
+            {bulkSync.running ? `同步中 ${bulkSync.completed}/${bulkSync.total}` : "同步全部"}
           </Button>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
-            disabled={channelsLoading || totalChannels === 0}
+            disabled={anySyncRunning || failedChannels.length === 0}
+            onClick={() => void startBulkSync(true)}
+          >
+            <RefreshCw className={cn("size-3.5", bulkSync.running && "animate-spin")} />
+            {"同步失败"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            disabled={channelsLoading || allChannels.length === 0}
             onClick={() => setGroupsOpen(true)}
           >
             <Tags className="size-3.5" />
             {"分组"}
           </Button>
           <Button
+            variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
-            onClick={() => {
-              setEditing(null)
-              setCreating(true)
-            }}
+            onClick={() => setImportOpen(true)}
+          >
+            <FileUp className="size-3.5" />
+            {"导入"}
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={openCreate}
           >
             <Plus className="size-3.5" />
             {"新增"}
@@ -782,17 +959,16 @@ export function ChannelCards() {
       ) : totalChannels === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">{"还没有任何渠道。"}</p>
-          <Button
-            size="sm"
-            className="mt-3 gap-1.5"
-            onClick={() => {
-              setEditing(null)
-              setCreating(true)
-            }}
-          >
-            <Plus className="size-3.5" />
-            {"添加第一个渠道"}
-          </Button>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <Button size="sm" className="gap-1.5" onClick={openCreate}>
+              <Plus className="size-3.5" />
+              {"添加第一个渠道"}
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setImportOpen(true)}>
+              <FileUp className="size-3.5" />
+              {"导入备份"}
+            </Button>
+          </div>
         </div>
       ) : (
         <>
@@ -800,6 +976,8 @@ export function ChannelCards() {
             {visibleChannels.map((c) => {
               const status = statusOf(c)
               const meta = statusMap[status]
+              const errInfo = classifyChannelError(c.last_error)
+              const statusLabel = status === "failed" ? failedStatusLabel(c) : meta.label
               return (
                 <Card key={c.id} className="flex flex-col gap-0 border border-border p-3 shadow-none sm:p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -879,16 +1057,66 @@ export function ChannelCards() {
                         </Tooltip>
                         <span className="text-[10px] text-muted-foreground">/</span>
                         <span className={cn("inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset", meta.cls)}>
-                          {meta.label}
+                          {statusLabel}
                         </span>
                       </div>
                     </StatTile>
                     <ChannelSubscriptionUsageMetricTiles channel={c} />
                     {c.last_error ? (
-                      <div className="col-span-3 rounded-md border border-border bg-muted/20 px-2.5 py-2">
-                        <p className="max-h-16 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-[11px] leading-4 text-danger" title={c.last_error}>
+                      <div className="col-span-3 space-y-1.5 rounded-md border border-danger/25 bg-danger/5 px-2.5 py-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex items-center rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-medium text-danger ring-1 ring-inset ring-danger/20">
+                            {errInfo.label || "登录失败"}
+                          </span>
+                          {errInfo.hint ? (
+                            <span className="text-[11px] leading-4 text-danger/90">{errInfo.hint}</span>
+                          ) : null}
+                        </div>
+                        <p
+                          className="max-h-12 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-[10px] leading-4 text-muted-foreground"
+                          title={c.last_error}
+                        >
                           {c.last_error}
                         </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {errInfo.suggestPasswordMode ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 px-2 text-[11px]"
+                              onClick={() => openEdit(c, "password")}
+                            >
+                              <KeyRound className="size-3" />
+                              {"改用密码登录"}
+                            </Button>
+                          ) : null}
+                          {errInfo.suggestRepasteToken ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 px-2 text-[11px]"
+                              onClick={() => openEdit(c, "token")}
+                            >
+                              <Pencil className="size-3" />
+                              {"重贴 Token"}
+                            </Button>
+                          ) : null}
+                          {errInfo.suggestCaptcha ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 px-2 text-[11px]"
+                              onClick={() =>
+                                toast.message("请到验证码配置页绑定打码服务，并在渠道上启用 Turnstile")
+                              }
+                            >
+                              {"配置打码"}
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -949,10 +1177,7 @@ export function ChannelCards() {
                       variant="outline"
                       size="sm"
                       className="gap-1 text-xs"
-                      onClick={() => {
-                        setEditing(c)
-                        setCreating(true)
-                      }}
+                      onClick={() => openEdit(c)}
                     >
                       <Pencil className="size-3" />
                       {"编辑"}
@@ -1138,9 +1363,25 @@ export function ChannelCards() {
         open={creating}
         onOpenChange={(v) => {
           setCreating(v)
-          if (!v) setEditing(null)
+          if (!v) {
+            setEditing(null)
+            setPreferCredentialMode(null)
+          }
         }}
         channel={editing}
+        preferCredentialMode={preferCredentialMode}
+      />
+
+      <ChannelImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onFinished={({ synced }) => {
+          if (synced) {
+            // 导入后同步完：切到失败筛选，方便处理指纹/过期等
+            setErrorFilter("failed")
+            setPage(1)
+          }
+        }}
       />
 
       <ChannelGroupsDialog
