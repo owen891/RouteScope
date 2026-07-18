@@ -1209,6 +1209,66 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
+          <SectionCard
+            icon={<ShieldCheck className="size-4 text-rose-600" />}
+            title="生产检查清单"
+            description="对外暴露或 7×24 运行前，按下列项自检。改 compose 环境变量后需要重建/重启容器。"
+          >
+            <ul className="space-y-2 text-xs leading-5 text-muted-foreground">
+              <li className="flex gap-2">
+                <span className={form.auth.enabled ? "text-emerald-600" : "text-amber-700"}>
+                  {form.auth.enabled ? "✓" : "!"}
+                </span>
+                <span>
+                  <strong className="text-foreground">登录鉴权</strong>
+                  ：当前 {form.auth.enabled ? "已在配置中开启" : "关闭（匿名可访问 /api）"}。
+                  生产请开启并设置强密码，保存后点「应用」；同时确认 `.env` 中
+                  <code className="mx-1 text-[11px]">AUTH_ENABLED=true</code>
+                  与容器环境一致。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">密钥</strong>
+                  ：轮换 <code className="text-[11px]">APP_SECRET</code> /
+                  <code className="text-[11px]">AUTH_TOKEN_SECRET</code> 后旧会话会失效，需重新登录。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">备份</strong>
+                  ：升级镜像或批量改库前复制
+                  <code className="mx-1 text-[11px]">data/upstream-ops.db</code>
+                  与
+                  <code className="mx-1 text-[11px]">data/config.yaml</code>
+                  。恢复时停服务后覆盖再启动。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">通知</strong>
+                  ：至少配置一个可用渠道（Telegram / QQ OneBot / Webhook 等）并点「测试」验证。
+                  Docker 内 QQ 机器人请用
+                  <code className="mx-1 text-[11px]">host.docker.internal</code>
+                  或宿主机 IP。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">端口暴露</strong>
+                  ：勿将未鉴权实例直接映射到公网；必要时前置反向代理与 HTTPS。
+                </span>
+              </li>
+            </ul>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              更完整说明见仓库 <code className="text-[11px]">docs/FORK_NOTES.md</code>。
+            </p>
+          </SectionCard>
+
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
             <Button onClick={handleSave} disabled={saving || applying}>
               {saving ? "保存中..." : "保存"}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import {
   ArrowUpDown,
@@ -529,6 +530,7 @@ function SyncProgressStrip({ state }: { state: ChannelSyncState }) {
 }
 
 export function ChannelCards() {
+  const navigate = useNavigate()
   const { data: channels, loading: channelsLoading } = useChannels()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<ChannelPageSize>(9)
@@ -591,6 +593,16 @@ export function ChannelCards() {
   const failedChannels = useMemo(
     () => allChannels.filter((c) => Boolean(c.last_error)),
     [allChannels],
+  )
+  const fingerprintFailed = useMemo(
+    () =>
+      failedChannels.filter((c) => classifyChannelError(c.last_error).kind === "fingerprint"),
+    [failedChannels],
+  )
+  const turnstileFailed = useMemo(
+    () =>
+      failedChannels.filter((c) => classifyChannelError(c.last_error).kind === "turnstile"),
+    [failedChannels],
   )
   const filteredByError = useMemo(() => {
     if (errorFilter === "all") return null
@@ -842,6 +854,59 @@ export function ChannelCards() {
     }
   }
 
+  async function batchSetPasswordMode() {
+    const targets =
+      errorFilter === "fingerprint"
+        ? fingerprintFailed
+        : failedChannels.filter((c) => {
+            const k = classifyChannelError(c.last_error).kind
+            return k === "fingerprint" || k === "token_expired" || k === "bad_password"
+          })
+    if (targets.length === 0) {
+      toast.message("当前没有适合改密码模式的失败渠道")
+      return
+    }
+    const email = window.prompt(
+      `将为 ${targets.length} 个失败渠道切换到「账号密码」模式。\n请输入登录邮箱/用户名（可留空则保留原 username）：`,
+      targets[0]?.username || "",
+    )
+    if (email === null) return
+    const password = window.prompt("请输入密码（将写入所选渠道，请确认环境可信）：")
+    if (password === null || !password.trim()) {
+      toast.error("未填写密码，已取消")
+      return
+    }
+    const ok = await confirm({
+      title: `确认批量改密码模式？`,
+      description: `将更新 ${targets.length} 个渠道的 credential_mode=password。密码仅发往本机 UpstreamOps API。`,
+      confirmLabel: "确认写入",
+      destructive: true,
+    })
+    if (!ok) return
+
+    let okN = 0
+    let failN = 0
+    for (const ch of targets) {
+      try {
+        await apiFetch(`/channels/${ch.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            credential_mode: "password",
+            username: email.trim() || ch.username,
+            password: password.trim(),
+            turnstile_enabled: ch.turnstile_enabled,
+          }),
+        })
+        okN += 1
+      } catch {
+        failN += 1
+      }
+    }
+    toast.message(`批量改密码完成：成功 ${okN}，失败 ${failN}`)
+    setErrorFilter("failed")
+    refresh()
+  }
+
   async function withBusy(key: string, fn: () => Promise<unknown>) {
     setBusyAction(key)
     try {
@@ -922,6 +987,33 @@ export function ChannelCards() {
             <RefreshCw className={cn("size-3.5", bulkSync.running && "animate-spin")} />
             {"同步失败"}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            disabled={
+              anySyncRunning ||
+              (fingerprintFailed.length === 0 &&
+                failedChannels.filter((c) => {
+                  const k = classifyChannelError(c.last_error).kind
+                  return k === "token_expired" || k === "bad_password"
+                }).length === 0)
+            }
+            onClick={() => void batchSetPasswordMode()}
+          >
+            <KeyRound className="size-3.5" />
+            {"批量改密"}
+          </Button>
+          {turnstileFailed.length > 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => navigate("/captcha")}
+            >
+              {"打码配置"}
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -1109,9 +1201,7 @@ export function ChannelCards() {
                               variant="outline"
                               size="sm"
                               className="h-7 gap-1 px-2 text-[11px]"
-                              onClick={() =>
-                                toast.message("请到验证码配置页绑定打码服务，并在渠道上启用 Turnstile")
-                              }
+                              onClick={() => navigate("/captcha")}
                             >
                               {"配置打码"}
                             </Button>
@@ -1375,9 +1465,8 @@ export function ChannelCards() {
       <ChannelImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        onFinished={({ synced }) => {
-          if (synced) {
-            // 导入后同步完：切到失败筛选，方便处理指纹/过期等
+        onFinished={({ synced, writtenIds }) => {
+          if (synced || writtenIds.length > 0) {
             setErrorFilter("failed")
             setPage(1)
           }
