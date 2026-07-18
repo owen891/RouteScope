@@ -68,6 +68,7 @@ import { ChannelAPIKeysDialog } from "@/components/monitor/channel-api-keys-dial
 import {
   ChannelSubscriptionUsageMetricTiles,
 } from "@/components/monitor/channel-subscription-usage-dialog"
+import { parseChannelExtra } from "@/lib/channel-extra"
 import {
   CHANNEL_ERROR_FILTERS,
   classifyChannelError,
@@ -560,6 +561,14 @@ export function ChannelCards() {
     }
     return "all"
   })
+  const [compactCards, setCompactCards] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem("uh_channel_compact") === "1"
+    } catch {
+      return false
+    }
+  })
 
   useEffect(() => {
     try {
@@ -568,6 +577,14 @@ export function ChannelCards() {
       /* ignore */
     }
   }, [errorFilter])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("uh_channel_compact", compactCards ? "1" : "0")
+    } catch {
+      /* ignore */
+    }
+  }, [compactCards])
 
   function openCreate() {
     setEditing(null)
@@ -610,11 +627,22 @@ export function ChannelCards() {
     return failedChannels.filter((c) => classifyChannelError(c.last_error).kind === errorFilter)
   }, [errorFilter, failedChannels])
   const filterActive = filteredByError != null
-  const visibleChannels = filterActive
-    ? filteredByError
-    : (channelPage?.items ?? [])
+  const failFirst = errorFilter === "all"
+  const visibleChannels = useMemo(() => {
+    const base = filterActive
+      ? (filteredByError as Channel[])
+      : (channelPage?.items ?? [])
+    if (!failFirst || filterActive) return base
+    // When showing paged "all", still surface failed channels first within the page.
+    return [...base].sort((a, b) => {
+      const af = a.last_error ? 0 : 1
+      const bf = b.last_error ? 0 : 1
+      if (af !== bf) return af - bf
+      return (b.sort_order ?? 0) - (a.sort_order ?? 0)
+    })
+  }, [filterActive, filteredByError, channelPage?.items, failFirst])
   const totalChannels = filterActive
-    ? filteredByError.length
+    ? filteredByError!.length
     : (channelPage?.total ?? 0)
   const pageSizeAll = pageSize === "all" || filterActive
   const totalPages = pageSizeAll ? 1 : (channelPage?.pages ?? 1)
@@ -947,7 +975,17 @@ export function ChannelCards() {
               ? `筛选 ${totalChannels} / 全部 ${allChannels.length}`
               : `${totalChannels} 个渠道`}
             {failedChannels.length > 0 ? ` · 失败 ${failedChannels.length}` : ""}
+            {errorFilter === "all" ? " · 失败优先" : ""}
           </span>
+          <Button
+            variant={compactCards ? "default" : "outline"}
+            size="sm"
+            className="h-8 gap-1.5 px-2 text-xs"
+            onClick={() => setCompactCards((v) => !v)}
+            title="切换卡片密度"
+          >
+            {compactCards ? "紧凑" : "舒适"}
+          </Button>
           <Select
             value={errorFilter}
             onValueChange={(v) => {
@@ -1050,8 +1088,11 @@ export function ChannelCards() {
         </p>
       ) : totalChannels === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">{"还没有任何渠道。"}</p>
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <p className="text-sm font-medium text-foreground">{"还没有任何渠道"}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {"可手动新增，或从 all-api-hub 备份 JSON 一键导入。"}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <Button size="sm" className="gap-1.5" onClick={openCreate}>
               <Plus className="size-3.5" />
               {"添加第一个渠道"}
@@ -1060,18 +1101,34 @@ export function ChannelCards() {
               <FileUp className="size-3.5" />
               {"导入备份"}
             </Button>
+            <Button size="sm" variant="ghost" className="gap-1.5 text-xs" onClick={() => navigate("/settings")}>
+              {"查看设置 / 备份说明"}
+            </Button>
           </div>
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+          <div
+            className={cn(
+              "grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3",
+              compactCards && "gap-2",
+            )}
+          >
             {visibleChannels.map((c) => {
               const status = statusOf(c)
               const meta = statusMap[status]
               const errInfo = classifyChannelError(c.last_error)
               const statusLabel = status === "failed" ? failedStatusLabel(c) : meta.label
+              const extra = parseChannelExtra(c.login_extra_params)
               return (
-                <Card key={c.id} className="flex flex-col gap-0 border border-border p-3 shadow-none sm:p-4">
+                <Card
+                  key={c.id}
+                  className={cn(
+                    "flex flex-col gap-0 border border-border shadow-none",
+                    compactCards ? "p-2.5 sm:p-3" : "p-3 sm:p-4",
+                    c.last_error && "border-danger/30",
+                  )}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-semibold text-foreground">{c.name}</span>
@@ -1090,6 +1147,20 @@ export function ChannelCards() {
                           {"已暂停"}
                         </span>
                       ) : null}
+                      {extra.source ? (
+                        <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground ring-1 ring-inset ring-border">
+                          {extra.source}
+                        </span>
+                      ) : null}
+                      {extra.tagIds.slice(0, 3).map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex max-w-[6rem] truncate items-center rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-700 ring-1 ring-inset ring-violet-500/20 dark:text-violet-300"
+                          title={tag}
+                        >
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <div className="text-right text-[10px] leading-4 text-muted-foreground">
@@ -1119,6 +1190,15 @@ export function ChannelCards() {
                       </Tooltip>
                     </div>
                   </div>
+
+                  {extra.notesPreview ? (
+                    <p
+                      className="mt-1.5 truncate text-[11px] text-muted-foreground"
+                      title={extra.notesPreview}
+                    >
+                      {extra.notesPreview}
+                    </p>
+                  ) : null}
 
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <StatTile label="余额">
