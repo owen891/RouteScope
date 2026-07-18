@@ -38,6 +38,8 @@ interface ChannelFormDialogProps {
   onOpenChange: (v: boolean) => void
   /** 编辑模式时传入；为空表示新增 */
   channel?: Channel | null
+  /** 打开编辑时强制展示的凭据模式（仅影响表单初始值，不写库） */
+  preferCredentialMode?: CredentialMode | null
 }
 
 /**
@@ -78,7 +80,7 @@ interface FormState {
   captcha_config_id: string // "" 表示不绑定
 }
 
-function initialState(c?: Channel | null): FormState {
+function initialState(c?: Channel | null, preferCredentialMode?: CredentialMode | null): FormState {
   const rechargeMultiplierMode = c?.recharge_multiplier_mode === "multiply" ? "multiply" : "divide"
   return {
     name: c?.name ?? "",
@@ -88,7 +90,7 @@ function initialState(c?: Channel | null): FormState {
     sort_order: c?.sort_order != null ? String(c.sort_order) : "1",
     password: "",
     login_extra_params: c?.login_extra_params ?? "",
-    credential_mode: c?.credential_mode ?? "password",
+    credential_mode: preferCredentialMode ?? c?.credential_mode ?? "password",
     newapi_token_kind: "cookie",
     newapi_cookie: "",
     newapi_access_token: "",
@@ -131,8 +133,13 @@ function buildTokenCredential(form: FormState): string {
   })
 }
 
-export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDialogProps) {
-  const [form, setForm] = useState<FormState>(() => initialState(channel))
+export function ChannelFormDialog({
+  open,
+  onOpenChange,
+  channel,
+  preferCredentialMode = null,
+}: ChannelFormDialogProps) {
+  const [form, setForm] = useState<FormState>(() => initialState(channel, preferCredentialMode))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refresh = useTriggerRefresh()
@@ -141,10 +148,10 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
   // 打开 / 切换目标渠道时重置表单。
   useEffect(() => {
     if (open) {
-      setForm(initialState(channel))
+      setForm(initialState(channel, preferCredentialMode))
       setError(null)
     }
-  }, [open, channel])
+  }, [open, channel, preferCredentialMode])
 
   const isEdit = !!channel
   const isTokenMode = form.credential_mode === "token"
