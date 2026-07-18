@@ -68,3 +68,11 @@ cmd/seed-demo/
 frontend/tsconfig.tsbuildinfo
 
 docs/md
+# Local ops / second-fork tooling (do not commit)
+_preview_proxy.py
+upstream-ops-linux
+docker-compose.override.yml
+data/backups/
+*.db
+*.db-shm
+*.db-wal
