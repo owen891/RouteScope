@@ -67,6 +67,12 @@ interface ConfigState {
   // Server酱³
   serverchan3_uid: string
   serverchan3_sendkey: string
+  // QQ Bot (OneBot)
+  qq_base_url: string
+  qq_access_token: string
+  qq_message_type: "group" | "private"
+  qq_group_id: string
+  qq_user_id: string
 }
 
 interface SubRow {
@@ -104,6 +110,11 @@ function emptyConfig(): ConfigState {
     secret: "",
     serverchan3_uid: "",
     serverchan3_sendkey: "",
+    qq_base_url: "http://127.0.0.1:5700",
+    qq_access_token: "",
+    qq_message_type: "group",
+    qq_group_id: "",
+    qq_user_id: "",
   }
 }
 
@@ -236,6 +247,21 @@ function buildConfigByType(type: NotificationChannelType, cfg: ConfigState): str
         uid: cfg.serverchan3_uid,
         sendkey: cfg.serverchan3_sendkey,
       })
+    case "qqbot": {
+      const body: Record<string, unknown> = {
+        base_url: cfg.qq_base_url.trim(),
+        message_type: cfg.qq_message_type,
+      }
+      if (cfg.qq_access_token.trim()) body.access_token = cfg.qq_access_token.trim()
+      if (cfg.qq_message_type === "group") {
+        if (!cfg.qq_group_id.trim()) throw new Error("QQ 群号 group_id 必填")
+        body.group_id = cfg.qq_group_id.trim()
+      } else {
+        if (!cfg.qq_user_id.trim()) throw new Error("QQ 用户 user_id 必填")
+        body.user_id = cfg.qq_user_id.trim()
+      }
+      return JSON.stringify(body)
+    }
   }
 }
 
@@ -310,6 +336,8 @@ export function NotificationFormDialog({
             return !!(form.cfg.host || form.cfg.from || form.cfg.to)
           case "serverchan3":
             return !!(form.cfg.serverchan3_uid || form.cfg.serverchan3_sendkey)
+          case "qqbot":
+            return !!(form.cfg.qq_base_url || form.cfg.qq_group_id || form.cfg.qq_user_id)
           default:
             return !!form.cfg.webhook_url
         }
@@ -405,6 +433,7 @@ export function NotificationFormDialog({
                 <SelectItem value="dingtalk">钉钉</SelectItem>
                 <SelectItem value="feishu">飞书</SelectItem>
                 <SelectItem value="serverchan3">Server酱³</SelectItem>
+                <SelectItem value="qqbot">QQ 机器人 (OneBot)</SelectItem>
               </SelectContent>
             </Select>
             {isEdit ? (
@@ -719,6 +748,84 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
             disabled={disabled}
           />
         </div>
+        {hint}
+      </div>
+    )
+  }
+
+  if (type === "qqbot") {
+    return (
+      <div className="space-y-2 rounded-lg border border-border p-3">
+        <p className="text-xs font-medium text-muted-foreground">QQ 机器人（OneBot HTTP）</p>
+        <p className="text-[11px] leading-4 text-muted-foreground">
+          兼容 go-cqhttp / NapCat / Lagrange.OneBot 等 OneBot HTTP API。
+          UpstreamOps 在 Docker 中时，不要填 127.0.0.1（那是容器自身）；
+          Windows Docker Desktop 可用 <code className="text-[10px]">http://host.docker.internal:端口</code>，
+          或填宿主机局域网 IP。保存后点渠道列表的「测试」验证。
+        </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="qq-base">HTTP API 地址</Label>
+          <Input
+            id="qq-base"
+            placeholder="http://127.0.0.1:5700"
+            value={cfg.qq_base_url}
+            onChange={(e) => updateCfg({ qq_base_url: e.target.value })}
+            required={!isEdit}
+            disabled={disabled}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="qq-token">Access Token（可选）</Label>
+          <Input
+            id="qq-token"
+            type="password"
+            placeholder="与机器人配置的 access_token 一致"
+            value={cfg.qq_access_token}
+            onChange={(e) => updateCfg({ qq_access_token: e.target.value })}
+            disabled={disabled}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>消息类型</Label>
+          <Select
+            value={cfg.qq_message_type}
+            onValueChange={(v) => updateCfg({ qq_message_type: v as "group" | "private" })}
+            disabled={disabled}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="group">群消息</SelectItem>
+              <SelectItem value="private">私聊</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {cfg.qq_message_type === "group" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="qq-group">群号 group_id</Label>
+            <Input
+              id="qq-group"
+              placeholder="例如 123456789"
+              value={cfg.qq_group_id}
+              onChange={(e) => updateCfg({ qq_group_id: e.target.value })}
+              required={!isEdit}
+              disabled={disabled}
+            />
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Label htmlFor="qq-user">QQ 号 user_id</Label>
+            <Input
+              id="qq-user"
+              placeholder="例如 10001"
+              value={cfg.qq_user_id}
+              onChange={(e) => updateCfg({ qq_user_id: e.target.value })}
+              required={!isEdit}
+              disabled={disabled}
+            />
+          </div>
+        )}
         {hint}
       </div>
     )

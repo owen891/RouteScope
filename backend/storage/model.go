@@ -192,6 +192,8 @@ const (
 	NotifyDingTalk    NotificationChannelType = "dingtalk"
 	NotifyFeishu      NotificationChannelType = "feishu"
 	NotifyServerChan3 NotificationChannelType = "serverchan3"
+	// NotifyQQBot is OneBot v11 HTTP API (go-cqhttp / NapCat / Lagrange.OneBot, etc.).
+	NotifyQQBot NotificationChannelType = "qqbot"
 )
 
 // NotificationChannel 通知渠道配置。ConfigCipher 加密保存 JSON 配置（含 token / webhook url / 密码等）。
