@@ -44,6 +44,7 @@ import type {
   NotificationChannel,
   NotificationChannelType,
   SystemConfig,
+  SystemConfigInput,
 } from "@/lib/api-types";
 import { decimal, money, relativeTime } from "@/lib/format";
 import {
@@ -68,6 +69,16 @@ interface ProxyTestResult {
   error?: string;
 }
 
+type SystemConfigForm = Omit<SystemConfig, "auth" | "proxy"> & {
+  auth: SystemConfig["auth"] & {
+    passwordReplacement: string;
+    tokenSecretReplacement: string;
+  };
+  proxy: SystemConfig["proxy"] & {
+    passwordReplacement: string;
+  };
+};
+
 export default function SettingsPage() {
   const query = useSystemConfig();
   const notifications = useNotificationChannels();
@@ -76,7 +87,7 @@ export default function SettingsPage() {
   const appVersion = useAppVersion();
   const refresh = useTriggerRefresh();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const [form, setForm] = useState<SystemConfig | null>(null);
+  const [form, setForm] = useState<SystemConfigForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [configSavedPendingApply, setConfigSavedPendingApply] = useState(false);
@@ -102,7 +113,18 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (query.data?.config) {
-      setForm(query.data.config);
+      setForm({
+        ...query.data.config,
+        auth: {
+          ...query.data.config.auth,
+          passwordReplacement: "",
+          tokenSecretReplacement: "",
+        },
+        proxy: {
+          ...query.data.config.proxy,
+          passwordReplacement: "",
+        },
+      });
     }
   }, [query.data]);
 
@@ -240,16 +262,62 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
-    if (form?.auth.enabled && !String(form.auth.password || "").trim()) {
-      // 后端可能已有哈希密码；仅当用户刚打开鉴权且密码框为空时警告，不阻断已有密码场景
+    if (
+      form?.auth.enabled &&
+      !form.auth.passwordConfigured &&
+      !form.auth.passwordReplacement.trim()
+    ) {
       toast.warning("已启用鉴权：若是首次开启，请填写管理员密码后再保存")
     }
+    if (!form) return;
+
+    const payload: SystemConfigInput = {
+      app: form.app,
+      auth: {
+        enabled: form.auth.enabled,
+        username: form.auth.username,
+        sessionTTLHours: form.auth.sessionTTLHours,
+        ...(form.auth.passwordReplacement.trim()
+          ? { passwordReplacement: form.auth.passwordReplacement }
+          : {}),
+        ...(form.auth.tokenSecretReplacement.trim()
+          ? { tokenSecretReplacement: form.auth.tokenSecretReplacement }
+          : {}),
+      },
+      scheduler: form.scheduler,
+      notifications: form.notifications,
+      proxy: {
+        enabled: form.proxy.enabled,
+        versionCheckEnabled: form.proxy.versionCheckEnabled,
+        protocol: form.proxy.protocol,
+        host: form.proxy.host,
+        port: form.proxy.port,
+        username: form.proxy.username,
+        ...(form.proxy.passwordReplacement.trim()
+          ? { passwordReplacement: form.proxy.passwordReplacement }
+          : {}),
+      },
+      upstream: form.upstream,
+    };
     setSaving(true);
     try {
       await apiFetch("/settings/config", {
         method: "PUT",
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
+      setForm((prev) =>
+        prev
+          ? {
+              ...prev,
+              auth: {
+                ...prev.auth,
+                passwordReplacement: "",
+                tokenSecretReplacement: "",
+              },
+              proxy: { ...prev.proxy, passwordReplacement: "" },
+            }
+          : prev,
+      );
       toast.success("已写入配置文件");
       setConfigSavedPendingApply(true);
       query.refetch();
@@ -283,7 +351,19 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<ProxyTestResult>("/settings/proxy/test", {
         method: "POST",
-        body: JSON.stringify(form?.proxy ?? {}),
+        body: JSON.stringify(
+          form
+            ? {
+                enabled: form.proxy.enabled,
+                versionCheckEnabled: form.proxy.versionCheckEnabled,
+                protocol: form.proxy.protocol,
+                host: form.proxy.host,
+                port: form.proxy.port,
+                username: form.proxy.username,
+                password: form.proxy.passwordReplacement,
+              }
+            : {},
+        ),
       });
       if (result.ok) {
         toast.success(
@@ -529,16 +609,28 @@ export default function SettingsPage() {
                 </Field>
                 <Field
                   label="管理员密码"
-                  description="保存后写入配置文件，应用后用于新登录。"
+                  description={
+                    form.auth.passwordConfigured
+                      ? "密码已配置；留空保持不变，输入内容仅用于替换。"
+                      : "尚未配置密码；启用鉴权前请输入新密码。"
+                  }
                 >
                   <Input
-                    value={form.auth.password}
+                    type="password"
+                    autoComplete="new-password"
+                    value={form.auth.passwordReplacement}
+                    placeholder={
+                      form.auth.passwordConfigured ? "已配置，留空不变" : "输入新密码"
+                    }
                     onChange={(e) =>
                       setForm((prev) =>
                         prev
                           ? {
                               ...prev,
-                              auth: { ...prev.auth, password: e.target.value },
+                              auth: {
+                                ...prev.auth,
+                                passwordReplacement: e.target.value,
+                              },
                             }
                           : prev,
                       )
@@ -547,10 +639,21 @@ export default function SettingsPage() {
                 </Field>
                 <Field
                   label="令牌签名密钥"
-                  description="留空时回退使用安全主密钥。"
+                  description={
+                    form.auth.tokenSecretConfigured
+                      ? "签名密钥已配置；留空保持不变，输入内容仅用于替换。"
+                      : "未单独配置时由后端回退到安全主密钥。"
+                  }
                 >
                   <Input
-                    value={form.auth.tokenSecret}
+                    type="password"
+                    autoComplete="new-password"
+                    value={form.auth.tokenSecretReplacement}
+                    placeholder={
+                      form.auth.tokenSecretConfigured
+                        ? "已配置，留空不变"
+                        : "可选：输入独立签名密钥"
+                    }
                     onChange={(e) =>
                       setForm((prev) =>
                         prev
@@ -558,7 +661,7 @@ export default function SettingsPage() {
                               ...prev,
                               auth: {
                                 ...prev.auth,
-                                tokenSecret: e.target.value,
+                                tokenSecretReplacement: e.target.value,
                               },
                             }
                           : prev,
@@ -1134,16 +1237,30 @@ export default function SettingsPage() {
                   }
                 />
               </Field>
-              <Field label="密码（可选）" description="代理认证密码。">
+              <Field
+                label="密码（可选）"
+                description={
+                  form.proxy.passwordConfigured
+                    ? "代理密码已配置；留空保持不变，输入内容仅用于替换。"
+                    : "尚未配置代理认证密码。"
+                }
+              >
                 <Input
                   type="password"
-                  value={form.proxy.password}
+                  autoComplete="new-password"
+                  value={form.proxy.passwordReplacement}
+                  placeholder={
+                    form.proxy.passwordConfigured ? "已配置，留空不变" : "输入代理密码"
+                  }
                   onChange={(e) =>
                     setForm((prev) =>
                       prev
                         ? {
                             ...prev,
-                            proxy: { ...prev.proxy, password: e.target.value },
+                            proxy: {
+                              ...prev.proxy,
+                              passwordReplacement: e.target.value,
+                            },
                           }
                         : prev,
                     )
@@ -1200,18 +1317,31 @@ export default function SettingsPage() {
                     const payload = {
                       exported_at: new Date().toISOString(),
                       config_path: query.data?.config_path ?? null,
-                      // 不导出密码与 tokenSecret
+                      // 导出结构按字段白名单构造，瞬时替换值不会进入文件。
                       config: {
-                        ...form,
+                        app: form.app,
                         auth: {
-                          ...form.auth,
-                          password: "",
-                          tokenSecret: "",
+                          enabled: form.auth.enabled,
+                          username: form.auth.username,
+                          passwordConfigured: form.auth.passwordConfigured,
+                          tokenSecretConfigured:
+                            form.auth.tokenSecretConfigured,
+                          sessionTTLHours: form.auth.sessionTTLHours,
                         },
+                        scheduler: form.scheduler,
+                        notifications: form.notifications,
                         proxy: {
-                          ...form.proxy,
-                          password: "",
+                          enabled: form.proxy.enabled,
+                          versionCheckEnabled:
+                            form.proxy.versionCheckEnabled,
+                          protocol: form.proxy.protocol,
+                          host: form.proxy.host,
+                          port: form.proxy.port,
+                          username: form.proxy.username,
+                          passwordConfigured:
+                            form.proxy.passwordConfigured,
                         },
+                        upstream: form.upstream,
                       },
                     }
                     const blob = new Blob([JSON.stringify(payload, null, 2)], {
