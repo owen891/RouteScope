@@ -29,8 +29,8 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 ### QQ Notification
 
-- [ ] **QQNT-01**: 运维者可以配置 OneBot HTTP 群聊或私聊目标、Base URL、Access Token 和查询鉴权模式，并通过设置页发送测试消息
-- [ ] **QQNT-02**: OneBot 发送正确处理群号/用户号、Bearer/查询鉴权、HTTP 错误和非零 retcode，并对 Docker 连通性、鉴权及目标错误给出可操作提示
+- [x] **QQNT-01**: 运维者可以配置 OneBot HTTP 群聊或私聊目标、Base URL、Access Token 和查询鉴权模式，并通过设置页发送测试消息
+- [x] **QQNT-02**: OneBot 发送正确处理群号/用户号、Bearer/查询鉴权、HTTP 错误和非零 retcode，并对 Docker 连通性、鉴权及目标错误给出可操作提示
 
 ### Security
 
@@ -113,8 +113,8 @@ Deferred until after the first local-ops release.
 | FAIL-01 | Phase 2 | Pending |
 | FAIL-02 | Phase 2 | Pending |
 | FAIL-03 | Phase 2 | Pending |
-| QQNT-01 | Phase 2 | Pending |
-| QQNT-02 | Phase 2 | Pending |
+| QQNT-01 | Phase 2 | Complete (protocol E2E; real delivery pending) |
+| QQNT-02 | Phase 2 | Complete (protocol E2E; real delivery pending) |
 | SECU-01 | Phase 1 | Complete |
 | SECU-02 | Phase 1 | Complete |
 | SECU-03 | Phase 1 | Complete |

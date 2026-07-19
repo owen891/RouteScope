@@ -1,12 +1,13 @@
 ---
 phase: 02-core-ops-onebot-validation
-verified: 2026-07-19T18:31:00+08:00
-status: partial_external_uat
+verified: 2026-07-19T19:25:00+08:00
+status: protocol_e2e_pass_external_delivery_pending
 automatic_checks: passed
 external_checks:
   onebot_endpoint: unavailable
-  group_message: pending
-  private_message: pending
+  group_message: protocol_fixture_passed_real_delivery_pending
+  private_message: protocol_fixture_passed_real_delivery_pending
+  failure_diagnosis: protocol_fixture_passed_real_delivery_pending
 ---
 
 # Phase 02 UAT
@@ -28,6 +29,17 @@ external_checks:
 - Failed-channel filtering supports fingerprint, expired token, Turnstile, password, network, and other categories; failed-only sync continues after individual failures.
 - Batch password recovery continues after individual failures and presents per-channel outcomes while preventing overlapping sync/recovery operations.
 - OneBot group/private targets, Bearer/query auth configuration, numeric/string target IDs, HTTP errors, nonzero retcodes, and reserved-character query tokens are covered by the form/transport tests.
+
+## Local protocol end-to-end evidence
+
+`backend/api/notifications_qqbot_integration_test.go` runs the real `/api/notifications/channels/:id/test` route with a temporary SQLite database, encrypted QQ configuration, the production Dispatcher, and in-process OneBot v11 HTTP fixtures. It passed:
+
+- group message with `Authorization: Bearer ...` and numeric `group_id`;
+- private message with URL-encoded query `access_token` and string `user_id`;
+- OneBot business failure (`retcode=100`, `group not found`) returned as actionable UI/API error;
+- HTTP 502 returned as an actionable transport error.
+
+This proves the application protocol and error-handling path end to end. It is not real QQ delivery: no bot account or reachable OneBot service is available in this environment.
 
 ## External UAT blocker
 
