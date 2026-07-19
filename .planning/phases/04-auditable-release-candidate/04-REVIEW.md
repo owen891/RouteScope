@@ -20,7 +20,7 @@ The review caught and fixed two correctness/security issues during the pass:
 - URL userinfo is stripped from evidence endpoints, preventing credentials embedded in a base URL from being persisted.
 - Successful group/private responses require a non-empty `message_id`; HTTP 200 plus `status=ok` alone is insufficient for delivery evidence.
 
-Evidence writes now use a temporary file followed by replacement, reducing partial-file risk on interruption. The runner contract tests assert the real-endpoint gate, redaction boundary, message-ID requirement, and evidence fields.
+Evidence writes now use a temporary file followed by replacement and clean the temporary path on exit, reducing partial-file and residue risk on interruption. The runner contract tests assert the real-endpoint gate, redaction boundary, message-ID requirement, and evidence fields.
 
 ## Residual External Prerequisite
 

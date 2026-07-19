@@ -20,4 +20,4 @@ status: implemented_external_delivery_pending
 
 Implemented the RELS-03 gap-closure boundary. Both external OneBot runners now require successful group/private responses with `message_id`, preserve HTTP/business failure status for diagnosis, and can write a token-free evidence JSON only when `ONEBOT_REAL_ENDPOINT=1` / `-RealEndpoint` is explicitly set. Evidence excludes access tokens, message bodies, and target IDs. Synthetic fixture and Compose-network runs remain protocol evidence only.
 
-Verification: PowerShell and Git Bash rehearsals against the disposable fixture passed group/private/error paths and generated synthetic evidence only when the real-endpoint gate was explicitly enabled for the rehearsal. Real QQ delivery remains pending because no reachable OneBot endpoint is configured.
+Verification: PowerShell and Git Bash rehearsals against the disposable fixture passed group/private/error paths. The negative gate test rejects evidence generation without explicit real-endpoint confirmation, and no fixture output is retained as release evidence. Real QQ delivery remains pending because no reachable OneBot endpoint is configured.

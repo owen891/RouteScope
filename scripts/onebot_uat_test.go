@@ -34,7 +34,7 @@ func TestOneBotUATScriptsAreExplicitAndRedacted(t *testing.T) {
 				}
 			}
 		} else {
-			for _, required := range []string{"EVIDENCE_PATH", "ONEBOT_REAL_ENDPOINT", "real_endpoint", "safe_endpoint", "evidence_tmp", "json.dump", "require_message_id", "check_response \"group\" \"$status\" 1", "check_response \"private\" \"$status\" 1"} {
+			for _, required := range []string{"EVIDENCE_PATH", "ONEBOT_REAL_ENDPOINT", "real_endpoint", "safe_endpoint", "evidence_tmp", "trap", "json.dump", "require_message_id", "check_response \"group\" \"$status\" 1", "check_response \"private\" \"$status\" 1"} {
 				if !strings.Contains(text, required) {
 					t.Errorf("%s must require message IDs and write evidence with %q", name, required)
 				}
