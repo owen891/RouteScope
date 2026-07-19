@@ -4,10 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if command -v pnpm >/dev/null 2>&1; then
-  PNPM=(pnpm)
-elif command -v corepack >/dev/null 2>&1; then
+if command -v corepack >/dev/null 2>&1; then
+  corepack prepare pnpm@10.4.0 --activate
   PNPM=(corepack pnpm)
+elif command -v pnpm >/dev/null 2>&1; then
+  PNPM=(pnpm)
 else
   echo "pnpm 10.4.0 is required. Enable Corepack or install the pinned pnpm version." >&2
   exit 1

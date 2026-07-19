@@ -33,21 +33,27 @@ function Invoke-Pnpm {
 
 try {
   Set-Location $Root
-  $Pnpm = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
-  if ($Pnpm) {
-    $script:PnpmCommand = @($Pnpm.Source)
+  $Corepack = Get-Command corepack -ErrorAction SilentlyContinue
+  if ($Corepack) {
+    & $Corepack.Source prepare pnpm@10.4.0 --activate
+    if ($LASTEXITCODE -ne 0) {
+      throw "Corepack could not prepare pnpm 10.4.0. Install the pinned pnpm version and retry."
+    }
+    $script:PnpmCommand = @($Corepack.Source, "pnpm")
   }
   else {
-    $Pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
+    $Pnpm = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
     if ($Pnpm) {
       $script:PnpmCommand = @($Pnpm.Source)
     }
     else {
-      $Corepack = Get-Command corepack -ErrorAction SilentlyContinue
-      if (-not $Corepack) {
+      $Pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
+      if ($Pnpm) {
+        $script:PnpmCommand = @($Pnpm.Source)
+      }
+      else {
         throw "pnpm 10.4.0 is required. Enable Corepack or install the pinned pnpm version."
       }
-      $script:PnpmCommand = @($Corepack.Source, "pnpm")
     }
   }
   $PnpmVersion = (Invoke-Pnpm --version).Trim()
