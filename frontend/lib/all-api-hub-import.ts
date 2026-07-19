@@ -112,10 +112,6 @@ export interface ParseBackupResult {
   parseError?: string
 }
 
-function asDict(v: unknown): Record<string, unknown> {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
-}
-
 function asStr(v: unknown): string {
   if (v == null) return ""
   return String(v).trim()
@@ -141,15 +137,20 @@ export function normalizeSiteUrl(url: string): string {
 }
 
 export function uniqueChannelName(base: string, used: Set<string>): string {
+  const maxLength = 120
   let name = (base || "未命名").trim() || "未命名"
-  if (name.length > 120) name = name.slice(0, 120)
+  if (name.length > maxLength) name = name.slice(0, maxLength)
   if (!used.has(name)) {
     used.add(name)
     return name
   }
   let i = 2
-  while (used.has(`${name}-${i}`)) i += 1
-  const out = `${name}-${i}`
+  let out = ""
+  do {
+    const suffix = `-${i}`
+    out = `${name.slice(0, maxLength - suffix.length)}${suffix}`
+    i += 1
+  } while (used.has(out))
   used.add(out)
   return out
 }
