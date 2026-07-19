@@ -70,6 +70,7 @@ interface ConfigState {
   // QQ Bot (OneBot)
   qq_base_url: string
   qq_access_token: string
+  qq_use_query_auth: boolean
   qq_message_type: "group" | "private"
   qq_group_id: string
   qq_user_id: string
@@ -113,6 +114,7 @@ function emptyConfig(): ConfigState {
     // Docker 内访问宿主机机器人的默认值；本机非 Docker 可改回 127.0.0.1
     qq_base_url: "http://host.docker.internal:5700",
     qq_access_token: "",
+    qq_use_query_auth: false,
     qq_message_type: "group",
     qq_group_id: "",
     qq_user_id: "",
@@ -252,6 +254,7 @@ function buildConfigByType(type: NotificationChannelType, cfg: ConfigState): str
       const body: Record<string, unknown> = {
         base_url: cfg.qq_base_url.trim(),
         message_type: cfg.qq_message_type,
+        use_query_auth: cfg.qq_use_query_auth,
       }
       if (cfg.qq_access_token.trim()) body.access_token = cfg.qq_access_token.trim()
       if (cfg.qq_message_type === "group") {
@@ -272,6 +275,7 @@ export function NotificationFormDialog({
   channel,
 }: NotificationFormDialogProps) {
   const [form, setForm] = useState<FormState>(() => initialState(channel))
+  const [configDirty, setConfigDirty] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refresh = useTriggerRefresh()
@@ -280,6 +284,7 @@ export function NotificationFormDialog({
   useEffect(() => {
     if (open) {
       setForm(initialState(channel))
+      setConfigDirty(false)
       setError(null)
     }
   }, [open, channel])
@@ -287,6 +292,7 @@ export function NotificationFormDialog({
   const isEdit = !!channel
 
   function updateCfg(patch: Partial<ConfigState>) {
+    setConfigDirty(true)
     setForm((f) => ({ ...f, cfg: { ...f.cfg, ...patch } }))
   }
 
@@ -325,7 +331,7 @@ export function NotificationFormDialog({
       }
 
       let configJSON = ""
-      const requireConfig = !isEdit
+      const requireConfig = !isEdit || configDirty
       // 判断 cfg 是否填了关键字段
       const hasConfigInput = (() => {
         switch (form.type) {
@@ -793,6 +799,22 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
         </div>
         <div className="space-y-1.5">
           <Label>消息类型</Label>
+          <div className="flex items-center justify-between gap-3 rounded border border-border px-2.5 py-2">
+            <div>
+              <Label htmlFor="qq-query-auth" className="text-xs font-medium">
+                Query auth
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Use access_token query auth instead of Authorization Bearer.
+              </p>
+            </div>
+            <Switch
+              id="qq-query-auth"
+              checked={cfg.qq_use_query_auth}
+              onCheckedChange={(v) => updateCfg({ qq_use_query_auth: v })}
+              disabled={disabled}
+            />
+          </div>
           <Select
             value={cfg.qq_message_type}
             onValueChange={(v) => updateCfg({ qq_message_type: v as "group" | "private" })}
