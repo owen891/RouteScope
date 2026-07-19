@@ -27,6 +27,20 @@ docker compose up -d app
 
 The production check must receive `/healthz = 200` and anonymous `/api/channels = 401`. Confirm the browser login, import preview, failure recovery controls, notification form, and settings production checklist after the container is healthy.
 
+For real OneBot v11 UAT, set the endpoint and target IDs in the operator environment and run the explicit sender only after confirming the targets:
+
+```bash
+ONEBOT_BASE_URL=http://127.0.0.1:5700 \
+ONEBOT_ACCESS_TOKEN='operator-secret' \
+ONEBOT_GROUP_ID=123456 \
+ONEBOT_USER_ID=10001 \
+ONEBOT_FAILURE_GROUP_ID=999999 \
+ONEBOT_CONFIRM=1 \
+./scripts/onebot-uat.sh
+```
+
+PowerShell equivalent: `powershell -File scripts/onebot-uat.ps1 -BaseUrl http://127.0.0.1:5700 -GroupId 123456 -UserId 10001 -FailureGroupId 999999 -Confirm`. The runner prints only HTTP/status/retcode/message-id presence and never prints the access token.
+
 ## Rollback
 
 1. Stop the app: `docker compose stop app`.

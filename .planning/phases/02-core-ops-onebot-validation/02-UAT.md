@@ -39,6 +39,8 @@ external_checks:
 - OneBot business failure (`retcode=100`, `group not found`) returned as actionable UI/API error;
 - HTTP 502 returned as an actionable transport error.
 
+The explicit real-endpoint runner is now available as `scripts/onebot-uat.sh` and `scripts/onebot-uat.ps1`. It defaults to dry-run, requires an explicit confirmation flag before sending, supports an optional expected-failure target, and redacts access tokens from output. It was exercised against a local v11 protocol fixture with group, private, and `retcode=100` failure responses.
+
 This proves the application protocol and error-handling path end to end. It is not real QQ delivery: no bot account or reachable OneBot service is available in this environment.
 
 ## External UAT blocker

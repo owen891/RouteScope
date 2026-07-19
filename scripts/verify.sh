@@ -21,7 +21,7 @@ if [[ "$PNPM_VERSION" != "10.4.0" ]]; then
 fi
 
 echo "==> validate native security and workflow contracts"
-go test ./scripts -run '^(TestBashSecurityTools|TestWorkflowContracts)$' -count=1
+go test ./scripts -run '^(TestBashSecurityTools|TestOneBotUATScriptsAreExplicitAndRedacted|TestWorkflowContracts)$' -count=1
 
 echo "==> check diff"
 git diff --check
