@@ -50,7 +50,7 @@
   4. 运维者可以从失败卡片直接进入清理登录信息、重贴 Token、修改密码或 Turnstile 验证码处理流程。
   5. 运维者可以从设置页配置并实测 OneBot 群聊和私聊目标以及 Bearer/查询鉴权；HTTP、retcode、Docker 连通性、鉴权或目标错误会给出可执行的排查提示。
 
-**Plans**: TBD
+**Plans**: 0/3 plans created
 **UI hint**: yes
 
 ### Phase 3: 可恢复部署与浏览器验证

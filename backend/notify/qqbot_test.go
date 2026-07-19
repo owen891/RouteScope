@@ -90,6 +90,33 @@ func TestQQBotSendPrivateWithQueryAuth(t *testing.T) {
 	}
 }
 
+func TestQQBotQueryAuthEscapesReservedCharacters(t *testing.T) {
+	var rawQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"status":"ok","retcode":0}`))
+	}))
+	defer srv.Close()
+
+	raw, _ := json.Marshal(map[string]any{
+		"base_url":       srv.URL,
+		"access_token":   "a%2Fb?c#d + e&f=g",
+		"user_id":        "user-1",
+		"message_type":   "private",
+		"use_query_auth": true,
+	})
+	n, err := newQQBot(string(raw))
+	if err != nil {
+		t.Fatalf("newQQBot: %v", err)
+	}
+	if err := n.Send(context.Background(), Message{Body: "message"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if rawQuery != "access_token=a%252Fb%3Fc%23d+%2B+e%26f%3Dg" {
+		t.Fatalf("raw query = %q", rawQuery)
+	}
+}
+
 func TestQQBotReturnsOneBotBusinessError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":"failed","retcode":100,"wording":"group not found"}`))

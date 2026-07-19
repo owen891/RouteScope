@@ -440,6 +440,13 @@ interface BulkSyncState {
   total: number
 }
 
+interface BatchRecoveryResult {
+  id: number
+  name: string
+  ok: boolean
+  error?: string
+}
+
 const stageLabel: Record<ProgressEvent["stage"], string> = {
   captcha: "打码",
   session: "会话",
@@ -601,10 +608,13 @@ export function ChannelCards() {
   const [recharging, setRecharging] = useState<Channel | null>(null)
   const [managingKeys, setManagingKeys] = useState<Channel | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [batchRecoveryRunning, setBatchRecoveryRunning] = useState(false)
+  const [batchRecoveryResults, setBatchRecoveryResults] = useState<BatchRecoveryResult[] | null>(null)
   // 每个渠道当前 sync 进度（最新一条事件） + 历史事件
   const [syncState, setSyncState] = useState<Record<number, ChannelSyncState>>({})
   const [bulkSync, setBulkSync] = useState<BulkSyncState>({ running: false, completed: 0, total: 0 })
-  const anySyncRunning = bulkSync.running || Object.values(syncState).some((s) => s.running)
+  const anySyncRunning =
+    batchRecoveryRunning || bulkSync.running || Object.values(syncState).some((s) => s.running)
   const channelPage = pageQuery.data
   const allChannels = channels ?? []
   const failedChannels = useMemo(
@@ -914,21 +924,40 @@ export function ChannelCards() {
 
     let okN = 0
     let failN = 0
-    for (const ch of targets) {
-      try {
-        await apiFetch(`/channels/${ch.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            credential_mode: "password",
-            username: email.trim() || ch.username,
-            password: password.trim(),
-            turnstile_enabled: ch.turnstile_enabled,
-          }),
-        })
-        okN += 1
-      } catch {
-        failN += 1
+    setBatchRecoveryRunning(true)
+    setBatchRecoveryResults([])
+    try {
+      for (const ch of targets) {
+        try {
+          await apiFetch(`/channels/${ch.id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              credential_mode: "password",
+              username: email.trim() || ch.username,
+              password: password.trim(),
+              turnstile_enabled: ch.turnstile_enabled,
+            }),
+          })
+          okN += 1
+          setBatchRecoveryResults((prev) => [
+            ...(prev ?? []),
+            { id: ch.id, name: ch.name, ok: true },
+          ])
+        } catch (e) {
+          failN += 1
+          setBatchRecoveryResults((prev) => [
+            ...(prev ?? []),
+            {
+              id: ch.id,
+              name: ch.name,
+              ok: false,
+              error: e instanceof Error ? e.message : "淇澶辫触",
+            },
+          ])
+        }
       }
+    } finally {
+      setBatchRecoveryRunning(false)
     }
     toast.message(`批量改密码完成：成功 ${okN}，失败 ${failN}`)
     setErrorFilter("failed")
@@ -964,6 +993,24 @@ export function ChannelCards() {
 
   return (
     <section>
+      {batchRecoveryResults ? (
+        <div className="mb-3 rounded-md border border-border bg-muted/20 p-2.5 text-xs">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="font-medium">Batch recovery results</span>
+            <span className="text-muted-foreground">
+              {batchRecoveryResults.filter((item) => item.ok).length}/{batchRecoveryResults.length}
+            </span>
+          </div>
+          <ul className="max-h-32 space-y-0.5 overflow-y-auto">
+            {batchRecoveryResults.map((item) => (
+              <li key={item.id} className={cn(item.ok ? "text-success" : "text-danger")}>
+                {item.ok ? "✓" : "×"} {item.name}
+                {item.error ? ` - ${item.error}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-baseline gap-3">
           <h2 className="text-base font-semibold text-foreground">{"渠道"}</h2>

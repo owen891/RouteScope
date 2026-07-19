@@ -54,6 +54,7 @@ type RowResult = {
   index: number
   name: string
   ok: boolean
+  action?: "create" | "update"
   error?: string
   id?: number
 }
@@ -225,6 +226,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
             index: row.index,
             name: payload.name,
             ok: true,
+            action: "update",
             id: row.existing_id,
           })
         } else {
@@ -232,7 +234,13 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
             method: "POST",
             body: JSON.stringify(payload),
           })
-          out.push({ index: row.index, name: payload.name, ok: true, id: created?.id })
+          out.push({
+            index: row.index,
+            name: payload.name,
+            ok: true,
+            action: "create",
+            id: created?.id,
+          })
         }
       } catch (e) {
         const err = e as Error

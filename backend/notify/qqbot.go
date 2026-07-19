@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/bejix/upstream-ops/backend/storage"
@@ -108,7 +109,7 @@ func (q *qqBot) Send(ctx context.Context, msg Message) error {
 		body["user_id"] = parseFlexibleID(q.cfg.UserID)
 	}
 	if q.cfg.UseQueryAuth && q.cfg.AccessToken != "" {
-		endpoint = endpoint + "?access_token=" + urlQueryEscape(q.cfg.AccessToken)
+		endpoint = endpoint + "?access_token=" + url.QueryEscape(q.cfg.AccessToken)
 	}
 
 	req := q.http.R().
@@ -159,12 +160,6 @@ func parseFlexibleID(v string) any {
 	var n json.Number = json.Number(v)
 	// resty/json will encode Number as number
 	return n
-}
-
-func urlQueryEscape(s string) string {
-	// minimal escape for token in query
-	r := strings.NewReplacer(" ", "%20", "+", "%2B", "&", "%26", "=", "%3D")
-	return r.Replace(s)
 }
 
 func firstNonEmpty(vals ...string) string {
