@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v0.0.6
 milestone_name: milestone
-current_phase: 02
-current_phase_name: 核心运维与 OneBot 实测
-status: verifying
-stopped_at: Phase 02 automatic verification passed; real OneBot endpoint required for external UAT
-last_updated: "2026-07-19T10:32:00.000Z"
+current_phase: 03
+current_phase_name: 可恢复部署与浏览器验证
+status: planning
+stopped_at: Phase 02 automatic verification passed; Phase 3 recovery/browser plans are ready
+last_updated: "2026-07-19T10:45:00.000Z"
 last_activity: 2026-07-19
-last_activity_desc: Phase 02 workflow gaps implemented; automatic gates passed; external OneBot UAT pending
+last_activity_desc: Phase 3 recovery/browser plans created; Phase 2 real OneBot UAT remains explicitly pending
 progress:
   total_phases: 4
   completed_phases: 1
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** 运维者能够安全、快速地发现上游渠道故障，批量修复或同步，并在变更前后可靠地验证与恢复数据。
-**Current focus:** Phase 02 — 核心运维与 OneBot 实测
+**Current focus:** Phase 03 — 可恢复部署与浏览器验证
 
 ## Current Position
 
-Phase: 02 (核心运维与 OneBot 实测) — VERIFYING
-Plan: 3 of 3
-Status: Automatic verification passed; real OneBot endpoint required for external UAT
-Last activity: 2026-07-19 — Phase 02 workflow gaps implemented; automatic gates passed; external OneBot UAT pending
+Phase: 03 (可恢复部署与浏览器验证) — PLANNING
+Plan: 0 of 3
+Status: Phase 3 recovery/browser plans ready; Phase 2 real OneBot UAT remains pending
+Last activity: 2026-07-19 — Phase 3 recovery/browser plans created
 
 Progress: [██░░░░░░░░] 25%
 
