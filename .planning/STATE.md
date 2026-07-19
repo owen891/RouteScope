@@ -4,16 +4,16 @@ milestone: v0.0.6
 milestone_name: milestone
 current_phase: 04
 current_phase_name: 可审查发布候选
-status: planning
-stopped_at: Phase 03 automatic recovery and browser verification passed; Phase 2 real OneBot UAT and Phase 4 release work remain
+status: verifying
+stopped_at: Phase 04 automatic candidate build and audit passed; final OneBot UAT remains
 last_updated: "2026-07-19T19:00:00.000Z"
 last_activity: 2026-07-19
 last_activity_desc: Phase 3 recovery/browser plans created; Phase 2 real OneBot UAT remains explicitly pending
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 11
+  completed_plans: 10
   percent: 50
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 04 (可审查发布候选) — READY
-Plan: 0 of TBD
-Status: Phase 4 ready; Phase 2 real OneBot UAT remains explicitly pending
+Plan: 3 of 3
+Status: Automatic candidate verification complete; Phase 2 real OneBot UAT remains explicitly pending
 Last activity: 2026-07-19 - Phase 3 recovery drill and Playwright evidence recorded
 
 Progress: [█████░░░░░] 50%
