@@ -4,11 +4,11 @@ milestone: v0.0.6
 milestone_name: milestone
 current_phase: 02
 current_phase_name: 核心运维与 OneBot 实测
-status: planning
-stopped_at: Phase 02 plans created; ready to execute Wave 1
-last_updated: "2026-07-19T09:10:00.000Z"
+status: verifying
+stopped_at: Phase 02 automatic verification passed; real OneBot endpoint required for external UAT
+last_updated: "2026-07-19T10:32:00.000Z"
 last_activity: 2026-07-19
-last_activity_desc: Phase 02 scope inspected and three executable plans created
+last_activity_desc: Phase 02 workflow gaps implemented; automatic gates passed; external OneBot UAT pending
 progress:
   total_phases: 4
   completed_phases: 1
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 
 ## Current Position
 
-Phase: 02 (核心运维与 OneBot 实测) — PLANNING
-Plan: 0 of TBD
-Status: Phase 01 complete; Phase 02 plans ready for Wave 1 execution
-Last activity: 2026-07-19 — Phase 02 scope inspected and three executable plans created
+Phase: 02 (核心运维与 OneBot 实测) — VERIFYING
+Plan: 3 of 3
+Status: Automatic verification passed; real OneBot endpoint required for external UAT
+Last activity: 2026-07-19 — Phase 02 workflow gaps implemented; automatic gates passed; external OneBot UAT pending
 
 Progress: [██░░░░░░░░] 25%
 

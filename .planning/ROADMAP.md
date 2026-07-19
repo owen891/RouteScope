@@ -50,7 +50,7 @@
   4. 运维者可以从失败卡片直接进入清理登录信息、重贴 Token、修改密码或 Turnstile 验证码处理流程。
   5. 运维者可以从设置页配置并实测 OneBot 群聊和私聊目标以及 Bearer/查询鉴权；HTTP、retcode、Docker 连通性、鉴权或目标错误会给出可执行的排查提示。
 
-**Plans**: 0/3 plans created
+**Plans**: 3/3 plans implemented; external UAT pending
 **UI hint**: yes
 
 ### Phase 3: 可恢复部署与浏览器验证
@@ -91,7 +91,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. 自动门禁与生产安全 | 2/2 | Complete   | 2026-07-19 |
-| 2. 核心运维与 OneBot 实测 | 0/TBD | Not started | - |
+| 2. 核心运维与 OneBot 实测 | 3/3 | Verifying | - |
 | 3. 可恢复部署与浏览器验证 | 0/TBD | Not started | - |
 | 4. 可审查发布候选 | 0/TBD | Not started | - |
 
