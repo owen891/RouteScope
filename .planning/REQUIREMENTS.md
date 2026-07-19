@@ -40,21 +40,21 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 ### Recovery
 
-- [ ] **RECV-01**: 运维者可以为 SQLite 数据库及配置创建同一时间戳的备份，并列出可恢复快照
-- [ ] **RECV-02**: 运维者可以按时间戳执行恢复演练，应用会停止、恢复数据、清理旧 WAL/SHM、重新启动并通过健康检查
-- [ ] **RECV-03**: 升级、批量导入和正式发布文档明确要求先备份，并提供回退官方 v0.0.6 的可执行路径
+- [x] **RECV-01**: 运维者可以为 SQLite 数据库及配置创建同一时间戳的备份，并列出可恢复快照
+- [x] **RECV-02**: 运维者可以按时间戳执行恢复演练，应用会停止、恢复数据、清理旧 WAL/SHM、重新启动并通过健康检查
+- [x] **RECV-03**: 升级、批量导入和正式发布文档明确要求先备份，并提供回退官方 v0.0.6 的可执行路径
 
 ### Quality Gates
 
 - [x] **QUAL-01**: 开发者可以通过单一跨平台命令运行锁文件校验、前端 lint/test/build、Go 全量测试和 Compose 配置校验
 - [x] **QUAL-02**: GitHub Actions 在功能分支和 PR 上执行质量门禁，镜像发布作业必须等待同一门禁通过
 - [x] **QUAL-03**: 自动测试覆盖导入冲突与凭据边界、QQ 群聊/私聊与业务错误、鉴权签名与中间件边界
-- [ ] **QUAL-04**: 浏览器级自动化覆盖登录保护、导入预览与冲突策略、QQ 通知表单和生产检查关键路径
+- [x] **QUAL-04**: 浏览器级自动化覆盖登录保护、导入预览与冲突策略、QQ 通知表单和生产检查关键路径
 
 ### Release
 
-- [ ] **RELS-01**: Docker 构建使用冻结的 pnpm lockfile，并从干净检出生成可启动且健康的 `upstream-ops:local` 镜像
-- [ ] **RELS-02**: 发布文档说明自有 fork remote、版本命名、备份、升级、验证和回滚步骤，不依赖未跟踪的私有文件
+- [x] **RELS-01**: Docker 构建使用冻结的 pnpm lockfile，并从干净检出生成可启动且健康的 `upstream-ops:local` 镜像
+- [x] **RELS-02**: 发布文档说明自有 fork remote、版本命名、备份、升级、验证和回滚步骤，不依赖未跟踪的私有文件
 - [ ] **RELS-03**: `v0.0.6-ops.1` 候选版本通过全部自动门禁和人工 UAT，且分支处于可推送、可审查状态
 
 ## Acceptance Criteria
@@ -118,15 +118,15 @@ Deferred until after the first local-ops release.
 | SECU-01 | Phase 1 | Complete |
 | SECU-02 | Phase 1 | Complete |
 | SECU-03 | Phase 1 | Complete |
-| RECV-01 | Phase 3 | Pending |
-| RECV-02 | Phase 3 | Pending |
-| RECV-03 | Phase 3 | Pending |
+| RECV-01 | Phase 3 | Complete |
+| RECV-02 | Phase 3 | Complete |
+| RECV-03 | Phase 3 | Complete |
 | QUAL-01 | Phase 1 | Complete |
 | QUAL-02 | Phase 1 | Complete |
 | QUAL-03 | Phase 1 | Complete |
-| QUAL-04 | Phase 3 | Pending |
-| RELS-01 | Phase 4 | Pending |
-| RELS-02 | Phase 4 | Pending |
+| QUAL-04 | Phase 3 | Complete |
+| RELS-01 | Phase 4 | Complete |
+| RELS-02 | Phase 4 | Complete |
 | RELS-03 | Phase 4 | Pending |
 
 **Coverage:**
