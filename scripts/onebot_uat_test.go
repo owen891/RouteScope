@@ -28,13 +28,13 @@ func TestOneBotUATScriptsAreExplicitAndRedacted(t *testing.T) {
 			t.Errorf("%s may print access token", name)
 		}
 		if strings.HasSuffix(name, ".ps1") {
-			for _, required := range []string{"GetResponseStream", "EvidencePath", "RealEndpoint", "real_endpoint", "ConvertTo-Json", "StatusCode", "message_id", "did not return a message_id", "failure-case"} {
+			for _, required := range []string{"GetResponseStream", "EvidencePath", "RealEndpoint", "real_endpoint", "Get-SafeEndpoint", "ConvertTo-Json", "tempEvidencePath", "StatusCode", "message_id", "did not return a message_id", "failure-case"} {
 				if !strings.Contains(text, required) {
 					t.Errorf("%s must preserve HTTP failure evidence with %q", name, required)
 				}
 			}
 		} else {
-			for _, required := range []string{"EVIDENCE_PATH", "ONEBOT_REAL_ENDPOINT", "real_endpoint", "json.dump", "require_message_id", "check_response \"group\" \"$status\" 1", "check_response \"private\" \"$status\" 1"} {
+			for _, required := range []string{"EVIDENCE_PATH", "ONEBOT_REAL_ENDPOINT", "real_endpoint", "safe_endpoint", "evidence_tmp", "json.dump", "require_message_id", "check_response \"group\" \"$status\" 1", "check_response \"private\" \"$status\" 1"} {
 				if !strings.Contains(text, required) {
 					t.Errorf("%s must require message IDs and write evidence with %q", name, required)
 				}
