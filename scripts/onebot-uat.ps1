@@ -4,6 +4,8 @@ param(
   [Parameter(Mandatory = $true)][string]$UserId,
   [string]$AccessToken = $env:ONEBOT_ACCESS_TOKEN,
   [string]$FailureGroupId = $env:ONEBOT_FAILURE_GROUP_ID,
+  [string]$EvidencePath = $env:ONEBOT_UAT_EVIDENCE_PATH,
+  [switch]$RealEndpoint,
   [switch]$Confirm,
   [string]$Message = "UpstreamOps OneBot UAT $([DateTime]::UtcNow.ToString('o'))"
 )
@@ -18,10 +20,22 @@ function Invoke-OneBot([string]$Endpoint, [hashtable]$Body, [ValidateSet("bearer
   if ($AccessToken -and $Mode -eq "query") { $uri += "?access_token=$([uri]::EscapeDataString($AccessToken))" }
   try {
     $response = Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -ContentType "application/json" -Body ($Body | ConvertTo-Json -Compress) -UseBasicParsing -TimeoutSec 15
-    return @{ Status = [int]$response.StatusCode; Data = ($response.Content | ConvertFrom-Json) }
+    $data = $null
+    try { $data = $response.Content | ConvertFrom-Json } catch { }
+    return @{ Status = [int]$response.StatusCode; Data = $data; Error = $null }
   }
   catch {
-    if ($_.Exception.Response) { throw "${Endpoint}: HTTP $([int]$_.Exception.Response.StatusCode)" }
+    if ($_.Exception.Response) {
+      $errorResponse = $_.Exception.Response
+      $data = $null
+      try {
+        $stream = $errorResponse.GetResponseStream()
+        $reader = [System.IO.StreamReader]::new($stream)
+        $raw = $reader.ReadToEnd()
+        if ($raw) { $data = $raw | ConvertFrom-Json }
+      } catch { }
+      return @{ Status = [int]$errorResponse.StatusCode; Data = $data; Error = $null }
+    }
     throw
   }
 }
@@ -35,24 +49,52 @@ if (-not $Confirm) {
   Write-Host "dry-run only: endpoint=$BaseUrl; group/private targets configured; use -Confirm to send"
   exit 0
 }
-
-function Assert-OK($Label, $Result) {
-  $retcode = $Result.Data.retcode
-  $status = $Result.Data.status
-  $messageId = if ($null -ne $Result.Data.message_id) { "present" } else { "absent" }
-  Write-Host "$Label`: HTTP $($Result.Status), status=$status, retcode=$retcode, message_id=$messageId"
-  if ($Result.Status -ne 200 -or $status -ne "ok" -or ($null -ne $retcode -and $retcode -ne 0)) { throw "$Label failed" }
+if ($EvidencePath -and -not $RealEndpoint) {
+  throw "-EvidencePath requires -RealEndpoint; synthetic fixtures cannot produce release evidence"
+}
+if ($EvidencePath -and -not $FailureGroupId) {
+  throw "-EvidencePath requires -FailureGroupId so the release record contains a deliberate failure"
 }
 
-Assert-OK "group" (Invoke-OneBot "send_group_msg" @{ group_id = (Convert-OneBotId $GroupId); message = $Message } "bearer")
-Assert-OK "private" (Invoke-OneBot "send_private_msg" @{ user_id = (Convert-OneBotId $UserId); message = $Message } "query")
+function Assert-OK($Label, $Result) {
+  $retcode = if ($Result.Data) { $Result.Data.retcode } else { $null }
+  $status = if ($Result.Data) { $Result.Data.status } else { "missing" }
+  $hasMessageId = $Result.Data -and $null -ne $Result.Data.message_id
+  $messageId = if ($hasMessageId) { $Result.Data.message_id } else { "missing" }
+  Write-Host "$Label`: HTTP $($Result.Status), status=$status, retcode=$retcode, message_id=$messageId"
+  if ($Result.Status -ne 200 -or $status -ne "ok" -or ($null -ne $retcode -and $retcode -ne 0) -or -not $hasMessageId) { throw "$Label failed: OneBot did not return a message_id" }
+}
+
+$groupResult = Invoke-OneBot "send_group_msg" @{ group_id = (Convert-OneBotId $GroupId); message = $Message } "bearer"
+Assert-OK "group" $groupResult
+$privateResult = Invoke-OneBot "send_private_msg" @{ user_id = (Convert-OneBotId $UserId); message = $Message } "query"
+Assert-OK "private" $privateResult
+$failureResult = $null
 if ($FailureGroupId) {
-  $failure = Invoke-OneBot "send_group_msg" @{ group_id = (Convert-OneBotId $FailureGroupId); message = "$Message failure-case" } "bearer"
-  $failureStatus = $failure.Data.status
-  $failureRetcode = $failure.Data.retcode
-  Write-Host "failure-case`: HTTP $($failure.Status), status=$failureStatus, retcode=$failureRetcode"
-  if ($failure.Status -eq 200 -and $failureStatus -eq "ok" -and ($null -eq $failureRetcode -or $failureRetcode -eq 0)) {
+  $failureResult = Invoke-OneBot "send_group_msg" @{ group_id = (Convert-OneBotId $FailureGroupId); message = "$Message failure-case" } "bearer"
+  $failureStatus = if ($failureResult.Data) { $failureResult.Data.status } else { "missing" }
+  $failureRetcode = if ($failureResult.Data) { $failureResult.Data.retcode } else { $null }
+  Write-Host "failure-case`: HTTP $($failureResult.Status), status=$failureStatus, retcode=$failureRetcode"
+  if ($failureResult.Status -eq 200 -and $failureStatus -eq "ok" -and ($null -eq $failureRetcode -or $failureRetcode -eq 0)) {
     throw "failure-case unexpectedly succeeded"
   }
+}
+if ($EvidencePath) {
+  $safeEndpoint = ([Uri]$BaseUrl).GetLeftPart([System.UriPartial]::Path).TrimEnd('/')
+  $record = [ordered]@{
+    version = 1
+    source = "external-onebot-runner"
+    real_endpoint = $true
+    confirmed = $true
+    tested_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+    endpoint = $safeEndpoint
+    group = [ordered]@{ http_status = $groupResult.Status; status = if ($groupResult.Data) { $groupResult.Data.status } else { "missing" }; retcode = if ($groupResult.Data) { $groupResult.Data.retcode } else { $null }; message_id = if ($groupResult.Data) { $groupResult.Data.message_id } else { $null } }
+    private = [ordered]@{ http_status = $privateResult.Status; status = if ($privateResult.Data) { $privateResult.Data.status } else { "missing" }; retcode = if ($privateResult.Data) { $privateResult.Data.retcode } else { $null }; message_id = if ($privateResult.Data) { $privateResult.Data.message_id } else { $null } }
+    failure = [ordered]@{ http_status = if ($failureResult) { $failureResult.Status } else { $null }; status = if ($failureResult -and $failureResult.Data) { $failureResult.Data.status } else { "missing" }; retcode = if ($failureResult -and $failureResult.Data) { $failureResult.Data.retcode } else { $null }; message_id = if ($failureResult -and $failureResult.Data) { $failureResult.Data.message_id } else { $null } }
+  }
+  $parent = Split-Path -Parent $EvidencePath
+  if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+  $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $EvidencePath -Encoding UTF8
+  Write-Host "UAT evidence written: $EvidencePath"
 }
 Write-Host "OneBot group/private delivery checks passed" -ForegroundColor Green

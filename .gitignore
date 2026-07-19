@@ -76,3 +76,5 @@ data/backups/
 *.db
 *.db-shm
 *.db-wal
+.uat/
+.uat-evidence-*.json

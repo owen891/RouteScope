@@ -36,11 +36,12 @@ ONEBOT_ACCESS_TOKEN='operator-secret' \
 ONEBOT_GROUP_ID=123456 \
 ONEBOT_USER_ID=10001 \
 ONEBOT_FAILURE_GROUP_ID=999999 \
+ONEBOT_REAL_ENDPOINT=1 \
 ONEBOT_CONFIRM=1 \
 ./scripts/onebot-uat.sh
 ```
 
-PowerShell equivalent: `powershell -File scripts/onebot-uat.ps1 -BaseUrl http://127.0.0.1:5700 -GroupId 123456 -UserId 10001 -FailureGroupId 999999 -Confirm`. The runner prints only HTTP/status/retcode/message-id presence and never prints the access token.
+PowerShell equivalent: `powershell -File scripts/onebot-uat.ps1 -BaseUrl http://127.0.0.1:5700 -GroupId 123456 -UserId 10001 -FailureGroupId 999999 -RealEndpoint -Confirm -EvidencePath .uat/onebot-evidence.json`. Save the output and JSON as UAT evidence: the evidence path requires explicit real-endpoint confirmation, records HTTP/status/retcode and returned `message_id`, and never stores the access token or message body.
 
 ## Rollback
 

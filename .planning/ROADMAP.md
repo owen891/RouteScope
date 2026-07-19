@@ -93,7 +93,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. 自动门禁与生产安全 | 2/2 | Complete   | 2026-07-19 |
 | 2. 核心运维与 OneBot 实测 | 3/3 | Complete (protocol/Compose UAT; external QQ pending) | 2026-07-19 |
 | 3. 可恢复部署与浏览器验证 | 3/3 | Complete (external OneBot pending) | 2026-07-19 |
-| 4. 可审查发布候选 | 3/3 | Verifying (external OneBot pending) | 2026-07-19 |
+| 4. 可审查发布候选 | 4/4 | Verifying (external OneBot pending; gap-closure implemented) | 2026-07-19 |
 
 ---
 *Roadmap created: 2026-07-18*
