@@ -32,6 +32,13 @@ describe("normalizeSiteUrl / uniqueChannelName", () => {
     expect(uniqueChannelName("A", used)).toBe("A-2")
     expect(used.has("A-2")).toBe(true)
   })
+  it("keeps renamed channels within the API name limit", () => {
+    const name = "A".repeat(120)
+    const used = new Set([name])
+    const renamed = uniqueChannelName(name, used)
+    expect(renamed).toHaveLength(120)
+    expect(renamed.endsWith("-2")).toBe(true)
+  })
 })
 
 describe("jwtExp / notes password", () => {
@@ -119,6 +126,83 @@ describe("parseAllApiHubBackup", () => {
     expect(ok?.action).toBe("update")
     expect(ok?.existing_id).toBe(99)
     expect(ok?.warnings).toContain("matched_by_url")
+  })
+
+  it("skips existing channels when requested", () => {
+    const parsed = parseAllApiHubBackup(sample, ["Demo"], {
+      nameConflict: "skip",
+    })
+    expect(parsed.rows[0]).toMatchObject({
+      source_name: "Demo",
+      skip: true,
+    })
+    expect(parsed.rows[0].payload).toBeUndefined()
+  })
+
+  it("reports malformed and unsupported backup shapes", () => {
+    expect(parseAllApiHubBackup("not-json").parseError).toMatch(/JSON/)
+    expect(parseAllApiHubBackup({ version: "2.0" }).parseError).toMatch(/accounts/)
+  })
+
+  it("falls back to a notes password without storing the password in metadata", () => {
+    const parsed = parseAllApiHubBackup({
+      accounts: [
+        {
+          site_name: "Expired",
+          site_url: "expired.example",
+          site_type: "sub2api",
+          notes: "ops@example.com\nSecret99",
+          account_info: {
+            username: "old-user",
+            access_token: "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.sig",
+          },
+        },
+      ],
+    })
+    const row = parsed.rows[0]
+    expect(row.payload).toMatchObject({
+      credential_mode: "password",
+      username: "ops@example.com",
+      password: "Secret99",
+    })
+    expect(row.warnings).toContain("notes_password")
+    expect(row.payload?.login_extra_params).not.toContain("Secret99")
+  })
+
+  it("rejects expired credentials when all fallbacks are disabled", () => {
+    const parsed = parseAllApiHubBackup(
+      {
+        accounts: [
+          {
+            site_name: "Expired",
+            site_url: "expired.example",
+            site_type: "sub2api",
+            account_info: {
+              username: "old-user",
+              access_token: "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.sig",
+            },
+          },
+        ],
+      },
+      [],
+      { allowExpiredToken: false, allowNotesPassword: false },
+    )
+    expect(parsed.rows[0].error).toMatch(/无可用凭据/)
+    expect(parsed.rows[0].payload).toBeUndefined()
+  })
+
+  it("requires a user id for NewAPI token imports", () => {
+    const parsed = parseAllApiHubBackup({
+      accounts: [
+        {
+          site_name: "NewAPI",
+          site_url: "newapi.example",
+          site_type: "newapi",
+          account_info: { username: "user", access_token: "token" },
+        },
+      ],
+    })
+    expect(parsed.rows[0].error).toMatch(/user_id/)
   })
 })
 
