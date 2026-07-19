@@ -176,3 +176,5 @@ powershell -ExecutionPolicy Bypass -File ./scripts/check-production.ps1
 ## 仓外脚本（不进运行时 / 勿提交密钥）
 
 `data/` 下可能存在本地脚本（如 `import_backup.py`、`extract_quark_tokens.py`），仅离线使用，**不要**提交含 token 的 JSON/DB。
+
+备份契约（跨平台）：`scripts/backup-data.sh` 与 `scripts/backup-data.ps1` 均支持 `backup`、`verify <tag>`、`list`、`restore <tag>`。每个时间戳目录包含记录文件大小和 SHA-256 的 manifest。恢复会先验证 manifest，再暂存并原子替换 live 文件，清理旧 SQLite 边车文件，并要求 `/healthz` 检查成功。隔离演练可设置 `UPSTREAM_OPS_ROOT`、`UPSTREAM_OPS_DATA_DIR`、`UPSTREAM_OPS_BACKUP_DIR`、`BACKUP_TAG` 和 `UPSTREAM_OPS_HEALTH_URL`。当 Compose 应用正在运行时，`UPSTREAM_OPS_STOP_APP=0` 会拒绝操作；仅在应用已停止时使用。
