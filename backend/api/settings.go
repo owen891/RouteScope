@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -136,6 +137,10 @@ func saveSettingsConfig(c *gin.Context, d *Deps) {
 	cfg.Proxy.Username = in.Proxy.Username
 	applySecretReplacement(&cfg.Proxy.Password, in.Proxy.PasswordReplacement)
 	cfg.Upstream = in.Upstream.WithDefaults()
+	if err := validateSettingsAuthentication(cfg); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 
 	if err := config.Save(path, cfg); err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -148,6 +153,23 @@ func saveSettingsConfig(c *gin.Context, d *Deps) {
 			"message":     "已写入配置文件",
 		},
 	})
+}
+
+func validateSettingsAuthentication(fileCfg *config.Config) error {
+	effective, err := config.ApplyEnvironmentOverrides(fileCfg)
+	if err != nil {
+		return err
+	}
+	if !effective.Auth.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(effective.Auth.Username) == "" || strings.TrimSpace(effective.Auth.Password) == "" {
+		return errors.New("enabled authentication requires an administrator username and password")
+	}
+	if strings.TrimSpace(effective.Auth.TokenSecret) == "" && strings.TrimSpace(effective.Security.AppSecret) == "" {
+		return errors.New("enabled authentication requires an auth token secret or APP_SECRET")
+	}
+	return nil
 }
 
 func applySecretReplacement(current *string, replacement *string) {

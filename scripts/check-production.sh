@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${1:-http://localhost:8088}"
+BASE_URL="${1:-http://localhost:8080}"
 BASE_URL="${BASE_URL%/}"
 
 health_status="$(curl -sS --connect-timeout 5 --max-time 10 --max-redirs 0 -o /dev/null -w '%{http_code}' "$BASE_URL/healthz")"

@@ -17,6 +17,7 @@ import (
 type SchedulerFactory func(config.SchedulerConfig, config.ProxyConfig) *scheduler.Scheduler
 
 type Manager struct {
+	applyMu          sync.Mutex
 	mu               sync.RWMutex
 	configPath       string
 	securitySecret   string
@@ -110,13 +111,15 @@ func (m *Manager) AuthMiddleware() gin.HandlerFunc {
 }
 
 func (m *Manager) ApplyFromFile() (*ApplyResult, error) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+
 	m.mu.RLock()
 	path := m.configPath
 	secret := m.securitySecret
 	dispatcher := m.dispatcher
 	channelSvc := m.channelSvc
 	factory := m.schedulerFactory
-	oldScheduler := m.scheduler
 	m.mu.RUnlock()
 
 	cfg, err := config.Load(path)
@@ -129,6 +132,14 @@ func (m *Manager) ApplyFromFile() (*ApplyResult, error) {
 		return nil, err
 	}
 
+	newScheduler := factory(cfg.Scheduler, cfg.Proxy)
+	if err := newScheduler.Start(); err != nil {
+		return nil, err
+	}
+
+	// All fallible preparation completed above. Commit collaborators and manager
+	// state together so a failed apply never leaks a partial proxy/upstream policy.
+	m.mu.Lock()
 	if dispatcher != nil {
 		dispatcher.UpdatePolicy(notify.Policy{
 			NotificationPrefix:                       cfg.App.NotificationPrefix,
@@ -149,12 +160,7 @@ func (m *Manager) ApplyFromFile() (*ApplyResult, error) {
 		channelSvc.UpdateUpstreamConfig(cfg.Upstream)
 	}
 
-	newScheduler := factory(cfg.Scheduler, cfg.Proxy)
-	if err := newScheduler.Start(); err != nil {
-		return nil, err
-	}
-
-	m.mu.Lock()
+	oldScheduler := m.scheduler
 	m.auth = authSvc
 	m.scheduler = newScheduler
 	m.proxyConfig = cfg.Proxy
