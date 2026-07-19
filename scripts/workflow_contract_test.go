@@ -74,6 +74,8 @@ func assertQualityWorkflow(t *testing.T, root *yaml.Node) {
 	assertJobCommand(t, jobs, "frontend", "pnpm lint")
 	assertJobCommand(t, jobs, "frontend", "pnpm test")
 	assertJobCommand(t, jobs, "frontend", "pnpm build")
+	assertJobCommand(t, jobs, "frontend", "pnpm exec playwright install --with-deps chromium")
+	assertJobCommand(t, jobs, "frontend", "pnpm test:e2e")
 	assertJobCommand(t, jobs, "compose", "docker compose config --quiet")
 	assertJobCommand(t, jobs, "windows", "go test ./scripts -run '^TestPowerShellSecurityTools$' -count=1")
 	assertNoScalar(t, root, "continue-on-error")

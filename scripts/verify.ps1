@@ -1,5 +1,6 @@
 param(
-  [switch]$SkipInstall
+  [switch]$SkipInstall,
+  [switch]$SkipE2E
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,6 +73,10 @@ try {
   Invoke-CheckedCommand "lint frontend" { Invoke-Pnpm lint }
   Invoke-CheckedCommand "test frontend" { Invoke-Pnpm test }
   Invoke-CheckedCommand "build frontend" { Invoke-Pnpm build }
+  if (-not $SkipE2E -and $env:SKIP_E2E -ne "true") {
+    Invoke-CheckedCommand "install Playwright Chromium" { Invoke-Pnpm exec playwright install chromium }
+    Invoke-CheckedCommand "test browser workflows" { Invoke-Pnpm test:e2e }
+  }
 
   Set-Location $Root
   Invoke-CheckedCommand "test backend" { go test ./... -count=1 }

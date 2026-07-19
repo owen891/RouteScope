@@ -143,6 +143,8 @@ UI 还可下载**脱敏配置 JSON**（不含密码），便于存档非密钥�
 powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1
 ```
 
+浏览器回归门禁会在前端构建后安装 Chromium 并运行 `pnpm test:e2e`。本地缺少浏览器二进制时可显式设置 `SKIP_E2E=true`（或 PowerShell 使用 `-SkipE2E`），CI 不设置该选项，浏览器测试失败会阻断质量门禁。
+
 门禁包含：前端依赖锁定检查、lint、单测、生产构建、Go 全量测试和 Compose 配置校验。GitHub Actions 的 `Quality Gates` 使用同一组检查，镜像发布必须等待门禁通过。
 
 生产部署在开启鉴权并重建容器后，还应执行匿名访问检查：
