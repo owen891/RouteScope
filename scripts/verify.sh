@@ -34,6 +34,10 @@ fi
 "${PNPM[@]}" lint
 "${PNPM[@]}" test
 "${PNPM[@]}" build
+if [[ "${SKIP_E2E:-false}" != "true" ]]; then
+  "${PNPM[@]}" exec playwright install chromium
+  "${PNPM[@]}" test:e2e
+fi
 
 echo "==> backend tests"
 cd "$ROOT"
