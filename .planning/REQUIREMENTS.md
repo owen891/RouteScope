@@ -16,16 +16,16 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 ### Import
 
-- [ ] **IMPT-01**: 运维者可以在浏览器中读取并预览 all-api-hub v2 JSON 备份，原始备份不会上传到新的高权限导入端点
-- [ ] **IMPT-02**: 运维者可以对名称或标准化站点 URL 冲突选择重命名、跳过或更新，并在写入前看到每行决策和错误
-- [ ] **IMPT-03**: 运维者可以只同步本次成功写入的渠道，单行失败不会中止其余导入，结果会区分成功、跳过和失败
-- [ ] **IMPT-04**: 导入使用的密码、Token 与 Cookie 进入现有加密凭据字段，`login_extra_params` 不保存备注中的明文密码
+- [x] **IMPT-01**: 运维者可以在浏览器中读取并预览 all-api-hub v2 JSON 备份，原始备份不会上传到新的高权限导入端点
+- [x] **IMPT-02**: 运维者可以对名称或标准化站点 URL 冲突选择重命名、跳过或更新，并在写入前看到每行决策和错误
+- [x] **IMPT-03**: 运维者可以只同步本次成功写入的渠道，单行失败不会中止其余导入，结果会区分成功、跳过和失败
+- [x] **IMPT-04**: 导入使用的密码、Token 与 Cookie 进入现有加密凭据字段，`login_extra_params` 不保存备注中的明文密码
 
 ### Failure Operations
 
-- [ ] **FAIL-01**: 运维者可以按指纹、Token 过期、Turnstile、鉴权和网络等失败类型筛选渠道，默认列表将失败渠道优先展示
-- [ ] **FAIL-02**: 运维者可以对失败渠道执行仅同步失败、批量切换密码模式和批量更新密码，并得到逐项成功或失败反馈
-- [ ] **FAIL-03**: 运维者可以从失败卡片直接进入清理登录信息、重贴 Token、修改密码或验证码处理入口
+- [x] **FAIL-01**: 运维者可以按指纹、Token 过期、Turnstile、鉴权和网络等失败类型筛选渠道，默认列表将失败渠道优先展示
+- [x] **FAIL-02**: 运维者可以对失败渠道执行仅同步失败、批量切换密码模式和批量更新密码，并得到逐项成功或失败反馈
+- [x] **FAIL-03**: 运维者可以从失败卡片直接进入清理登录信息、重贴 Token、修改密码或验证码处理入口
 
 ### QQ Notification
 
@@ -106,13 +106,13 @@ Deferred until after the first local-ops release.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IMPT-01 | Phase 2 | Pending |
-| IMPT-02 | Phase 2 | Pending |
-| IMPT-03 | Phase 2 | Pending |
-| IMPT-04 | Phase 2 | Pending |
-| FAIL-01 | Phase 2 | Pending |
-| FAIL-02 | Phase 2 | Pending |
-| FAIL-03 | Phase 2 | Pending |
+| IMPT-01 | Phase 2 | Complete (automated/browser evidence) |
+| IMPT-02 | Phase 2 | Complete (automated/browser evidence) |
+| IMPT-03 | Phase 2 | Complete (automated/browser evidence) |
+| IMPT-04 | Phase 2 | Complete (automated/browser evidence) |
+| FAIL-01 | Phase 2 | Complete (automated/browser evidence) |
+| FAIL-02 | Phase 2 | Complete (automated/browser evidence) |
+| FAIL-03 | Phase 2 | Complete (automated/browser evidence) |
 | QQNT-01 | Phase 2 | Complete (protocol E2E; real delivery pending) |
 | QQNT-02 | Phase 2 | Complete (protocol E2E; real delivery pending) |
 | SECU-01 | Phase 1 | Complete |

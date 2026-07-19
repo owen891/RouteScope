@@ -63,7 +63,7 @@ try {
   }
 
   Invoke-CheckedCommand "validate native security and workflow contracts" {
-    go test ./scripts -run '^(TestPowerShellSecurityTools|TestWorkflowContracts)$' -count=1
+    go test ./scripts -run '^(TestOneBotUATScriptsAreExplicitAndRedacted|TestPowerShellSecurityTools|TestWorkflowContracts)$' -count=1
   }
   Invoke-CheckedCommand "check diff" { git diff --check }
   Set-Location (Join-Path $Root "frontend")

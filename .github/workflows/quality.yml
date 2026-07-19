@@ -31,7 +31,7 @@ jobs:
           cache: true
 
       - name: Validate Bash security and workflow contracts
-        run: go test ./scripts -run '^(TestBashSecurityTools|TestWorkflowContracts)$' -count=1
+        run: go test ./scripts -run '^(TestBashSecurityTools|TestOneBotUATScriptsAreExplicitAndRedacted|TestWorkflowContracts)$' -count=1
 
       - name: Test backend
         run: go test ./... -count=1
@@ -100,4 +100,4 @@ jobs:
 
       - name: Validate PowerShell security tools
         shell: pwsh
-        run: go test ./scripts -run '^TestPowerShellSecurityTools$' -count=1
+        run: go test ./scripts -run '^(TestOneBotUATScriptsAreExplicitAndRedacted|TestPowerShellSecurityTools)$' -count=1

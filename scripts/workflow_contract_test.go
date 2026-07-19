@@ -68,7 +68,7 @@ func assertQualityWorkflow(t *testing.T, root *yaml.Node) {
 			t.Errorf("quality workflow missing %s job", job)
 		}
 	}
-	assertJobCommand(t, jobs, "backend", "go test ./scripts -run '^(TestBashSecurityTools|TestWorkflowContracts)$' -count=1")
+	assertJobCommand(t, jobs, "backend", "go test ./scripts -run '^(TestBashSecurityTools|TestOneBotUATScriptsAreExplicitAndRedacted|TestWorkflowContracts)$' -count=1")
 	assertJobCommand(t, jobs, "backend", "go test ./... -count=1")
 	assertJobCommand(t, jobs, "frontend", "pnpm install --frozen-lockfile")
 	assertJobCommand(t, jobs, "frontend", "pnpm lint")
@@ -77,7 +77,7 @@ func assertQualityWorkflow(t *testing.T, root *yaml.Node) {
 	assertJobCommand(t, jobs, "frontend", "pnpm exec playwright install --with-deps chromium")
 	assertJobCommand(t, jobs, "frontend", "pnpm test:e2e")
 	assertJobCommand(t, jobs, "compose", "docker compose config --quiet")
-	assertJobCommand(t, jobs, "windows", "go test ./scripts -run '^TestPowerShellSecurityTools$' -count=1")
+	assertJobCommand(t, jobs, "windows", "go test ./scripts -run '^(TestOneBotUATScriptsAreExplicitAndRedacted|TestPowerShellSecurityTools)$' -count=1")
 	assertNoScalar(t, root, "continue-on-error")
 	assertScalar(t, root, "10.4.0")
 	assertScalar(t, root, "20")
