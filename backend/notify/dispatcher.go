@@ -67,6 +67,13 @@ func (d *Dispatcher) UpdateProxyConfig(cfg config.ProxyConfig) {
 	d.mu.Unlock()
 }
 
+// CurrentProxyConfig returns the proxy configuration used for new notifications.
+func (d *Dispatcher) CurrentProxyConfig() config.ProxyConfig {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.proxy
+}
+
 func (d *Dispatcher) proxyURL() (string, error) {
 	d.mu.RLock()
 	cfg := d.proxy

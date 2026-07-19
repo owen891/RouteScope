@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -168,5 +169,30 @@ func TestSaveRestrictsConfigPermissions(t *testing.T) {
 				t.Fatalf("permissions = %04o, want 0600", got)
 			}
 		})
+	}
+}
+
+func TestSaveRenameFailurePreservesExistingConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	original := []byte("app:\n  title: previous\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	originalRename := renameConfigFile
+	renameConfigFile = func(_, _ string) error {
+		return errors.New("rename failed")
+	}
+	t.Cleanup(func() { renameConfigFile = originalRename })
+
+	if err := Save(path, &Config{App: AppConfig{Title: "replacement"}}); err == nil {
+		t.Fatal("Save succeeded despite rename failure")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read existing config: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("existing config changed after failed rename: got %q, want %q", got, original)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -230,6 +231,37 @@ func TestSaveSettingsAcceptsExplicitSecretReplacements(t *testing.T) {
 	}
 	if got.Auth.Password != "new-admin-secret" || got.Auth.TokenSecret != "new-token-secret" || got.Proxy.Password != "new-proxy-secret" {
 		t.Fatalf("explicit replacements not persisted: auth=%#v proxy=%#v", got.Auth, got.Proxy)
+	}
+}
+
+func TestSaveSettingsRejectsInvalidEnabledAuthenticationWithoutWriting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, &config.Config{App: config.AppConfig{Title: "known-good"}}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	for _, name := range []string{"AUTH_ENABLED", "ADMIN_USERNAME", "ADMIN_PASSWORD", "AUTH_TOKEN_SECRET", "APP_SECRET"} {
+		t.Setenv(name, "")
+	}
+
+	body := strings.Replace(settingsBody("", "", ""), `"enabled":false`, `"enabled":true`, 1)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	newSettingsTestRouter(path).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config after rejected save: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Fatalf("invalid settings write changed config: before=%q after=%q", original, after)
 	}
 }
 

@@ -34,6 +34,18 @@ type securityToolPaths struct {
 	envBefore  []byte
 }
 
+func TestProductionProbeDefaultsToComposePort(t *testing.T) {
+	for _, name := range []string{"check-production.sh", "check-production.ps1"} {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if !strings.Contains(string(body), "http://localhost:8080") {
+			t.Fatalf("%s does not use the Docker Compose default port", name)
+		}
+	}
+}
+
 func TestBashSecurityTools(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Bash security tools are verified on Unix-family runners")
