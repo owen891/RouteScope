@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v0.0.6
 milestone_name: milestone
-current_phase: 03
-current_phase_name: 可恢复部署与浏览器验证
+current_phase: 04
+current_phase_name: 可审查发布候选
 status: planning
-stopped_at: Phase 02 automatic verification passed; Phase 3 recovery/browser plans are ready
-last_updated: "2026-07-19T10:45:00.000Z"
+stopped_at: Phase 03 automatic recovery and browser verification passed; Phase 2 real OneBot UAT and Phase 4 release work remain
+last_updated: "2026-07-19T19:00:00.000Z"
 last_activity: 2026-07-19
 last_activity_desc: Phase 3 recovery/browser plans created; Phase 2 real OneBot UAT remains explicitly pending
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 25
+  completed_phases: 2
+  total_plans: 8
+  completed_plans: 8
+  percent: 50
 ---
 
 # Project State
@@ -24,22 +24,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** 运维者能够安全、快速地发现上游渠道故障，批量修复或同步，并在变更前后可靠地验证与恢复数据。
-**Current focus:** Phase 03 — 可恢复部署与浏览器验证
+**Current focus:** Phase 04 — 可审查发布候选
 
 ## Current Position
 
-Phase: 03 (可恢复部署与浏览器验证) — PLANNING
-Plan: 0 of 3
-Status: Phase 3 recovery/browser plans ready; Phase 2 real OneBot UAT remains pending
-Last activity: 2026-07-19 — Phase 3 recovery/browser plans created
+Phase: 04 (可审查发布候选) — READY
+Plan: 0 of TBD
+Status: Phase 4 ready; Phase 2 real OneBot UAT remains explicitly pending
+Last activity: 2026-07-19 - Phase 3 recovery drill and Playwright evidence recorded
 
-Progress: [██░░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 2
+- Total plans completed: 8
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -51,8 +51,8 @@ Progress: [██░░░░░░░░] 25%
 
 **Recent Trend:**
 
-- Last 5 plans: -
-- Trend: Not started
+- Last 5 plans: 03-01, 03-02, 03-03, with automatic gates passed
+- Trend: steady
 
 ## Accumulated Context
 

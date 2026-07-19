@@ -8,7 +8,7 @@
 
 - [x] **Phase 1: 自动门禁与生产安全** - 让本地、CI 和发布作业共享可阻断的质量门禁，并验证生产鉴权边界。 (completed 2026-07-19)
 - [ ] **Phase 2: 核心运维与 OneBot 实测** - 用脱敏导入样本、失败渠道和真实 OneBot 完成日常运维工作流。
-- [ ] **Phase 3: 可恢复部署与浏览器验证** - 证明数据可以一致备份和恢复，并用浏览器 E2E 锁定关键路径。
+- [x] **Phase 3: 可恢复部署与浏览器验证** - 证明数据可以一致备份和恢复，并用浏览器 E2E 锁定关键路径。（自动验证完成；真实 OneBot 仍待外部 UAT）
 - [ ] **Phase 4: 可审查发布候选** - 从干净检出复现健康镜像，形成可推送、可审查、可打标签的候选版本。
 
 ## Phase Details
@@ -66,7 +66,7 @@
   3. 升级、批量导入和正式发布流程会明确要求先备份，并提供可实际执行的官方 v0.0.6 回退路径。
   4. 浏览器级自动化可以验证登录保护、导入预览与冲突策略、QQ 通知表单和生产检查路径，并在这些交互回归时失败。
 
-**Plans**: 0/3 plans created
+**Plans**: 3/3 plans complete; automatic evidence recorded, external OneBot UAT pending
 **UI hint**: yes
 
 ### Phase 4: 可审查发布候选
@@ -92,7 +92,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. 自动门禁与生产安全 | 2/2 | Complete   | 2026-07-19 |
 | 2. 核心运维与 OneBot 实测 | 3/3 | Verifying | - |
-| 3. 可恢复部署与浏览器验证 | 0/3 | Planning | - |
+| 3. 可恢复部署与浏览器验证 | 3/3 | Complete (external OneBot pending) | 2026-07-19 |
 | 4. 可审查发布候选 | 0/TBD | Not started | - |
 
 ---
