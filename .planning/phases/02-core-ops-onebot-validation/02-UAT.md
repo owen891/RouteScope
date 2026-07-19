@@ -41,6 +41,8 @@ external_checks:
 
 The explicit real-endpoint runner is now available as `scripts/onebot-uat.sh` and `scripts/onebot-uat.ps1`. It defaults to dry-run, requires an explicit confirmation flag before sending, supports an optional expected-failure target, and redacts access tokens from output. It was exercised against a local v11 protocol fixture with group, private, and `retcode=100` failure responses.
 
+The Docker-network runner is available as `scripts/onebot-compose-uat.sh` and `scripts/onebot-compose-uat.ps1`. It builds a disposable OneBot v11 fixture, starts the candidate app on an isolated Compose network with a tmpfs database, and executes the real notification API route from a checker container. The current run passed group Bearer auth, private query auth, and a `retcode=100` business failure. The fixture uses only synthetic IDs and tokens and is intentionally protocol/container-network evidence, not real QQ delivery.
+
 This proves the application protocol and error-handling path end to end. It is not real QQ delivery: no bot account or reachable OneBot service is available in this environment.
 
 ## External UAT blocker

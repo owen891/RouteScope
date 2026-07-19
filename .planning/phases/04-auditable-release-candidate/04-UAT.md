@@ -25,6 +25,7 @@ The first attempt hit a transient Docker Hub EOF while resolving `alpine:3.20`; 
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1 -SkipInstall` passed, including 4 Chromium Playwright tests, full Go tests, frontend lint/Vitest/build, and Compose validation.
 - `corepack pnpm --dir frontend test:e2e` passed: 4 Chromium tests.
 - `go test ./backend/api -run 'QQBotNotification' -count=1` passed: 4 API-level OneBot protocol scenarios.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/onebot-compose-uat.ps1` passed: isolated candidate app plus OneBot fixture verified group Bearer, private query auth, and business `retcode=100` failure propagation over the Docker network.
 - `git diff --check` passed before evidence commit.
 
 ## Secret and worktree audit
@@ -37,6 +38,8 @@ The first attempt hit a transient Docker Hub EOF while resolving `alpine:3.20`; 
 ## OneBot protocol evidence
 
 The application-level OneBot v11 path is covered end to end by `go test ./backend/api -run 'QQBotNotification' -count=1`: group Bearer, private query auth, business retcode failure, and HTTP 502 all passed through the real API route and Dispatcher. This closes the implementation gap without claiming real QQ account delivery.
+
+The Compose UAT adds the deployment-network check: the candidate container reaches a disposable OneBot fixture through the service DNS name, sends both supported target modes, and surfaces a nonzero OneBot retcode as an API test failure. It uses a tmpfs database and synthetic credentials, so it does not alter operator data or prove delivery to a real QQ account.
 
 ## Residual release blocker
 
