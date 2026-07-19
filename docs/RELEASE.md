@@ -16,6 +16,7 @@ This runbook describes the local fork release shape for `v0.0.6-ops.1`. It is in
 2. Run a verified snapshot with `./scripts/backup-data.sh backup` or `powershell -File ./scripts/backup-data.ps1 -Command backup`. Confirm it with `verify <tag>` and record the tag privately.
 3. Run the quality entrypoint: `scripts/verify.sh` on Unix/Git Bash or `scripts/verify.ps1` on Windows. The gate includes Go tests, frontend lint/Vitest/build, Playwright Chromium tests, and Compose validation.
 4. Run the candidate build and health drill without publishing: `scripts/release-candidate.sh all` or `powershell -File ./scripts/release-candidate.ps1 all`.
+5. Run the isolated deployment-network OneBot check: `./scripts/onebot-compose-uat.sh` or `powershell -File ./scripts/onebot-compose-uat.ps1`. This starts a disposable OneBot v11 fixture and validates the candidate's group/private protocol paths and business-error handling without touching `./data`.
 
 ## Deploy
 

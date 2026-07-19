@@ -1,0 +1,50 @@
+name: upstream-ops-onebot-uat
+
+services:
+  app:
+    image: ${UPSTREAM_OPS_CANDIDATE_IMAGE:-upstream-ops:candidate-local}
+    restart: "no"
+    environment:
+      APP_SECRET: uat-only-app-secret-not-production
+      AUTH_ENABLED: "false"
+      SERVER_MODE: release
+      LOG_LEVEL: warn
+      DATABASE_DRIVER: sqlite
+      DATABASE_PATH: /app/data/upstream-ops.db
+      NOTIFY_UAT_BASE_URL: http://onebot-fixture:5700
+    ports:
+      - "${UPSTREAM_OPS_UAT_PORT:-18419}:8418"
+    volumes: []
+    tmpfs:
+      - /app/data
+    depends_on:
+      onebot-fixture:
+        condition: service_healthy
+
+  onebot-fixture:
+    build:
+      context: ./docker/onebot-uat
+    restart: "no"
+    expose:
+      - "5700"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5700/healthz')"]
+      interval: 1s
+      timeout: 3s
+      retries: 10
+
+  onebot-check:
+    image: python:3.13-alpine
+    restart: "no"
+    working_dir: /srv
+    volumes:
+      - ./docker/onebot-uat/check.py:/srv/check.py:ro
+    environment:
+      APP_URL: http://app:8418
+      FIXTURE_URL: http://onebot-fixture:5700
+    depends_on:
+      app:
+        condition: service_started
+      onebot-fixture:
+        condition: service_healthy
+    command: ["python", "/srv/check.py"]
