@@ -527,6 +527,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
                     >
                       {r.ok ? "✓" : "✗"} {r.name}
                       {r.id != null ? ` (#${r.id})` : ""}
+                      {r.action ? ` (${r.action === "create" ? "new" : "update"})` : ""}
                       {r.error ? ` — ${r.error}` : ""}
                     </li>
                   ))}
