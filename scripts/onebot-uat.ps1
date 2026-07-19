@@ -45,6 +45,12 @@ function Convert-OneBotId([string]$Value) {
   return $Value
 }
 
+function Get-SafeEndpoint([string]$Value) {
+  $uri = [Uri]$Value
+  $port = if (($uri.Scheme -eq "http" -and $uri.Port -eq 80) -or ($uri.Scheme -eq "https" -and $uri.Port -eq 443)) { "" } else { ":$($uri.Port)" }
+  return "$($uri.Scheme)://$($uri.Host)$port$($uri.AbsolutePath.TrimEnd('/'))"
+}
+
 if (-not $Confirm) {
   Write-Host "dry-run only: endpoint=$BaseUrl; group/private targets configured; use -Confirm to send"
   exit 0
@@ -59,7 +65,7 @@ if ($EvidencePath -and -not $FailureGroupId) {
 function Assert-OK($Label, $Result) {
   $retcode = if ($Result.Data) { $Result.Data.retcode } else { $null }
   $status = if ($Result.Data) { $Result.Data.status } else { "missing" }
-  $hasMessageId = $Result.Data -and $null -ne $Result.Data.message_id
+  $hasMessageId = $Result.Data -and $null -ne $Result.Data.message_id -and "$($Result.Data.message_id)".Trim() -ne ""
   $messageId = if ($hasMessageId) { $Result.Data.message_id } else { "missing" }
   Write-Host "$Label`: HTTP $($Result.Status), status=$status, retcode=$retcode, message_id=$messageId"
   if ($Result.Status -ne 200 -or $status -ne "ok" -or ($null -ne $retcode -and $retcode -ne 0) -or -not $hasMessageId) { throw "$Label failed: OneBot did not return a message_id" }
@@ -80,7 +86,7 @@ if ($FailureGroupId) {
   }
 }
 if ($EvidencePath) {
-  $safeEndpoint = ([Uri]$BaseUrl).GetLeftPart([System.UriPartial]::Path).TrimEnd('/')
+  $safeEndpoint = Get-SafeEndpoint $BaseUrl
   $record = [ordered]@{
     version = 1
     source = "external-onebot-runner"
@@ -94,7 +100,14 @@ if ($EvidencePath) {
   }
   $parent = Split-Path -Parent $EvidencePath
   if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-  $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $EvidencePath -Encoding UTF8
+  $tempEvidencePath = "$EvidencePath.tmp.$PID"
+  try {
+    $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $tempEvidencePath -Encoding UTF8
+    Move-Item -LiteralPath $tempEvidencePath -Destination $EvidencePath -Force
+  }
+  finally {
+    Remove-Item -LiteralPath $tempEvidencePath -Force -ErrorAction SilentlyContinue
+  }
   Write-Host "UAT evidence written: $EvidencePath"
 }
 Write-Host "OneBot group/private delivery checks passed" -ForegroundColor Green

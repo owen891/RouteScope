@@ -18,6 +18,22 @@ if [[ -z "$GROUP_ID" || -z "$USER_ID" ]]; then
 fi
 BASE_URL="${BASE_URL%/}"
 
+safe_endpoint() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import urlsplit, urlunsplit
+parts = urlsplit(sys.argv[1])
+if not parts.scheme or not parts.hostname:
+    raise SystemExit("invalid OneBot base URL")
+netloc = parts.hostname
+if ":" in netloc and not netloc.startswith("["):
+    netloc = f"[{netloc}]"
+if parts.port is not None and not ((parts.scheme == "http" and parts.port == 80) or (parts.scheme == "https" and parts.port == 443)):
+    netloc += f":{parts.port}"
+print(urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", "")))
+PY
+}
+
 request() {
   local endpoint="$1" body="$2" mode="$3"
   local url="$BASE_URL/$endpoint"
@@ -53,7 +69,7 @@ retcode = data.get("retcode")
 ok = str(data.get("status", "")).lower() == "ok" and (retcode is None or retcode == 0)
 message_id = data.get("message_id", "missing")
 print(f"{label}: HTTP {status}, status={data.get('status', 'missing')}, retcode={retcode if retcode is not None else 'missing'}, message_id={message_id}")
-has_message_id = data.get("message_id") is not None
+has_message_id = data.get("message_id") is not None and str(data.get("message_id")).strip() != ""
 raise SystemExit(0 if ok and status == "200" and (require_message_id != "1" or has_message_id) else 1)
 PY
 }
@@ -100,8 +116,9 @@ PY
 fi
 if [[ -n "$EVIDENCE_PATH" ]]; then
   mkdir -p "$(dirname "$EVIDENCE_PATH")"
+  evidence_tmp="$EVIDENCE_PATH.tmp.$$"
   python3 - "$BASE_URL" "$GROUP_ID" "$USER_ID" "$FAILURE_GROUP_ID" "${failure_status:-}" \
-    /tmp/onebot-uat-group.$$ /tmp/onebot-uat-private.$$ /tmp/onebot-uat-failure.$$ <<'PY' > "$EVIDENCE_PATH"
+    /tmp/onebot-uat-group.$$ /tmp/onebot-uat-private.$$ /tmp/onebot-uat-failure.$$ <<'PY' > "$evidence_tmp"
 import json, sys
 from datetime import datetime, timezone
 
@@ -113,6 +130,18 @@ def read(path):
             return json.load(handle)
     except (OSError, json.JSONDecodeError):
         return {}
+
+def safe_endpoint(value):
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(value)
+    if not parts.scheme or not parts.hostname:
+        return value
+    netloc = parts.hostname
+    if ":" in netloc and not netloc.startswith("["):
+        netloc = f"[{netloc}]"
+    if parts.port is not None and not ((parts.scheme == "http" and parts.port == 80) or (parts.scheme == "https" and parts.port == 443)):
+        netloc += f":{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", ""))
 
 def result(path, status):
     data = read(path)
@@ -129,7 +158,7 @@ record = {
     "real_endpoint": True,
     "confirmed": True,
     "tested_at_utc": datetime.now(timezone.utc).isoformat(),
-    "endpoint": base_url,
+    "endpoint": safe_endpoint(base_url),
     "group": result(group_path, "200"),
     "private": result(private_path, "200"),
     "failure": result(failure_path, failure_http_status),
@@ -137,5 +166,6 @@ record = {
 json.dump(record, sys.stdout, ensure_ascii=False, indent=2)
 sys.stdout.write("\n")
 PY
+  mv -f "$evidence_tmp" "$EVIDENCE_PATH"
 fi
 echo "OneBot group/private delivery checks passed"
