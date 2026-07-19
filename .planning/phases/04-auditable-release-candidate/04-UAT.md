@@ -1,6 +1,6 @@
 ---
 phase: 04-auditable-release-candidate
-verified: 2026-07-19T19:20:00+08:00
+verified: 2026-07-19T19:25:00+08:00
 status: automatic_candidate_pass_external_onebot_pending
 ---
 
@@ -24,6 +24,7 @@ The first attempt hit a transient Docker Hub EOF while resolving `alpine:3.20`; 
 - PowerShell parser validation passed for release and quality scripts.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1 -SkipInstall` passed, including 4 Chromium Playwright tests, full Go tests, frontend lint/Vitest/build, and Compose validation.
 - `corepack pnpm --dir frontend test:e2e` passed: 4 Chromium tests.
+- `go test ./backend/api -run 'QQBotNotification' -count=1` passed: 4 API-level OneBot protocol scenarios.
 - `git diff --check` passed before evidence commit.
 
 ## Secret and worktree audit
@@ -33,6 +34,10 @@ The first attempt hit a transient Docker Hub EOF while resolving `alpine:3.20`; 
 - Candidate scripts do not contain `docker push`, registry login, formal tag creation, or secret output.
 - No release tag was created and no registry push was attempted.
 
+## OneBot protocol evidence
+
+The application-level OneBot v11 path is covered end to end by `go test ./backend/api -run 'QQBotNotification' -count=1`: group Bearer, private query auth, business retcode failure, and HTTP 502 all passed through the real API route and Dispatcher. This closes the implementation gap without claiming real QQ account delivery.
+
 ## Residual release blocker
 
-Real OneBot v11 group/private delivery is still unavailable in this environment. Phase 2 UAT remains explicitly pending until a reachable endpoint is configured and both message types plus one deliberate failure are recorded. Therefore this document does not claim `RELS-03` or final `v0.0.6-ops.1` sign-off.
+Real OneBot v11 group/private delivery is still unavailable in this environment. Phase 2 UAT remains explicitly pending until a reachable endpoint is configured and both message types plus one deliberate failure are recorded. The application protocol path is complete, but this document does not claim `RELS-03` or final `v0.0.6-ops.1` sign-off.
