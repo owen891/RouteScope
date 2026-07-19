@@ -6,7 +6,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: 自动门禁与生产安全** - 让本地、CI 和发布作业共享可阻断的质量门禁，并验证生产鉴权边界。
+- [x] **Phase 1: 自动门禁与生产安全** - 让本地、CI 和发布作业共享可阻断的质量门禁，并验证生产鉴权边界。 (completed 2026-07-19)
 - [ ] **Phase 2: 核心运维与 OneBot 实测** - 用脱敏导入样本、失败渠道和真实 OneBot 完成日常运维工作流。
 - [ ] **Phase 3: 可恢复部署与浏览器验证** - 证明数据可以一致备份和恢复，并用浏览器 E2E 锁定关键路径。
 - [ ] **Phase 4: 可审查发布候选** - 从干净检出复现健康镜像，形成可推送、可审查、可打标签的候选版本。
@@ -27,14 +27,14 @@
   4. 错误凭据、篡改 Token 和匿名受保护请求会被拒绝，而健康、版本和登录端点仍可匿名访问。
   5. 自动测试可以检测导入冲突与凭据边界、QQ 群聊/私聊与业务错误、鉴权签名与中间件边界的回归。
 
-**Plans**: 0/2 plans executed
+**Plans**: 2/2 plans complete
 **Wave 1**
 
-- [ ] 01-01-PLAN.md
+- [x] 01-01-PLAN.md
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md
+- [x] 01-02-PLAN.md
 
 ### Phase 2: 核心运维与 OneBot 实测
 
@@ -90,7 +90,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 自动门禁与生产安全 | 0/2 | Planned    |  |
+| 1. 自动门禁与生产安全 | 2/2 | Complete   | 2026-07-19 |
 | 2. 核心运维与 OneBot 实测 | 0/TBD | Not started | - |
 | 3. 可恢复部署与浏览器验证 | 0/TBD | Not started | - |
 | 4. 可审查发布候选 | 0/TBD | Not started | - |

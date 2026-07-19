@@ -96,6 +96,9 @@ docker compose up -d
 # 或指定密码：
 ./scripts/print-auth-env.sh 'YourStrongPass'
 
+# Windows PowerShell（输出同样的配置段落，不会改写 .env）：
+powershell -ExecutionPolicy Bypass -File ./scripts/print-auth-env.ps1
+
 # 粘贴到 .env 后：
 docker compose up -d --force-recreate
 
@@ -133,9 +136,24 @@ UI 还可下载**脱敏配置 JSON**（不含密码），便于存档非密钥�
 ## 测试
 
 ```bash
-cd frontend && pnpm test && pnpm build
-go test ./backend/notify/ -count=1
+# Linux / macOS / Git Bash：完整发布门禁
+./scripts/verify.sh
+
+# Windows PowerShell：完整发布门禁
+powershell -ExecutionPolicy Bypass -File ./scripts/verify.ps1
 ```
+
+门禁包含：前端依赖锁定检查、lint、单测、生产构建、Go 全量测试和 Compose 配置校验。GitHub Actions 的 `Quality Gates` 使用同一组检查，镜像发布必须等待门禁通过。
+
+生产部署在开启鉴权并重建容器后，还应执行匿名访问检查：
+
+```bash
+./scripts/check-production.sh
+# 或 PowerShell
+powershell -ExecutionPolicy Bypass -File ./scripts/check-production.ps1
+```
+
+默认检查 Compose 的 `http://localhost:8080`；自定义 `HTTP_PORT` 时可将目标 URL 作为 Bash 的首个参数或 PowerShell 的 `-BaseUrl` 传入。检查必须得到 `/healthz = 200`、匿名 `/api/channels = 401`。它不会读取或打印任何密码、Token。
 
 ## 与官方差异（概要）
 
@@ -151,7 +169,9 @@ go test ./backend/notify/ -count=1
 |------|------|
 | `scripts/build-local.sh` / `.ps1` | 复现 `upstream-ops:local` |
 | `scripts/backup-data.sh` | `backup` / `list` / `restore <ts>` |
-| `scripts/print-auth-env.sh` | 打印建议鉴权 `.env` 段落（不自动写入） |
+| `scripts/print-auth-env.sh` / `.ps1` | 打印建议鉴权 `.env` 段落（不自动写入） |
+| `scripts/verify.sh` / `.ps1` | 运行与 CI 一致的发布质量门禁 |
+| `scripts/check-production.sh` / `.ps1` | 验证健康检查与匿名 API 鉴权 |
 
 ## 仓外脚本（不进运行时 / 勿提交密钥）
 

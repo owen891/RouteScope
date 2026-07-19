@@ -34,9 +34,9 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 ### Security
 
-- [ ] **SECU-01**: 生产运维者可以生成但由自己保存的管理员密码与 Token 签名密钥，辅助脚本不会静默改写真实 `.env`
-- [ ] **SECU-02**: 生产部署健康检查返回 200，同时未登录访问 `/api/channels` 返回 401；不满足时发布前检查必须失败
-- [ ] **SECU-03**: 鉴权服务拒绝错误凭据、篡改 Token 和匿名受保护请求，同时保持健康、版本和登录端点可访问
+- [x] **SECU-01**: 生产运维者可以生成但由自己保存的管理员密码与 Token 签名密钥，辅助脚本不会静默改写真实 `.env`
+- [x] **SECU-02**: 生产部署健康检查返回 200，同时未登录访问 `/api/channels` 返回 401；不满足时发布前检查必须失败
+- [x] **SECU-03**: 鉴权服务拒绝错误凭据、篡改 Token 和匿名受保护请求，同时保持健康、版本和登录端点可访问
 
 ### Recovery
 
@@ -46,9 +46,9 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 ### Quality Gates
 
-- [ ] **QUAL-01**: 开发者可以通过单一跨平台命令运行锁文件校验、前端 lint/test/build、Go 全量测试和 Compose 配置校验
-- [ ] **QUAL-02**: GitHub Actions 在功能分支和 PR 上执行质量门禁，镜像发布作业必须等待同一门禁通过
-- [ ] **QUAL-03**: 自动测试覆盖导入冲突与凭据边界、QQ 群聊/私聊与业务错误、鉴权签名与中间件边界
+- [x] **QUAL-01**: 开发者可以通过单一跨平台命令运行锁文件校验、前端 lint/test/build、Go 全量测试和 Compose 配置校验
+- [x] **QUAL-02**: GitHub Actions 在功能分支和 PR 上执行质量门禁，镜像发布作业必须等待同一门禁通过
+- [x] **QUAL-03**: 自动测试覆盖导入冲突与凭据边界、QQ 群聊/私聊与业务错误、鉴权签名与中间件边界
 - [ ] **QUAL-04**: 浏览器级自动化覆盖登录保护、导入预览与冲突策略、QQ 通知表单和生产检查关键路径
 
 ### Release
@@ -115,15 +115,15 @@ Deferred until after the first local-ops release.
 | FAIL-03 | Phase 2 | Pending |
 | QQNT-01 | Phase 2 | Pending |
 | QQNT-02 | Phase 2 | Pending |
-| SECU-01 | Phase 1 | Pending |
-| SECU-02 | Phase 1 | Pending |
-| SECU-03 | Phase 1 | Pending |
+| SECU-01 | Phase 1 | Complete |
+| SECU-02 | Phase 1 | Complete |
+| SECU-03 | Phase 1 | Complete |
 | RECV-01 | Phase 3 | Pending |
 | RECV-02 | Phase 3 | Pending |
 | RECV-03 | Phase 3 | Pending |
-| QUAL-01 | Phase 1 | Pending |
-| QUAL-02 | Phase 1 | Pending |
-| QUAL-03 | Phase 1 | Pending |
+| QUAL-01 | Phase 1 | Complete |
+| QUAL-02 | Phase 1 | Complete |
+| QUAL-03 | Phase 1 | Complete |
 | QUAL-04 | Phase 3 | Pending |
 | RELS-01 | Phase 4 | Pending |
 | RELS-02 | Phase 4 | Pending |
