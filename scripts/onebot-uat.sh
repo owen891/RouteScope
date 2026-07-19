@@ -74,7 +74,7 @@ raise SystemExit(0 if ok and status == "200" and (require_message_id != "1" or h
 PY
 }
 
-trap 'rm -f /tmp/onebot-uat-response.$$ /tmp/onebot-uat-group.$$ /tmp/onebot-uat-private.$$ /tmp/onebot-uat-failure.$$' EXIT
+trap 'rm -f /tmp/onebot-uat-response.$$ /tmp/onebot-uat-group.$$ /tmp/onebot-uat-private.$$ /tmp/onebot-uat-failure.$$ "${evidence_tmp:-}"' EXIT
 if [[ "$CONFIRM" != "1" ]]; then
   echo "dry-run only: endpoint=$BASE_URL; group/private targets configured; set ONEBOT_CONFIRM=1 to send" 
   exit 0
