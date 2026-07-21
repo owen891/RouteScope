@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.0.6
-milestone_name: milestone
+milestone: v0.0.6-ops.1
+milestone_name: local-ops-edition
 current_phase: 04
 current_phase_name: 可审查发布候选
-status: verifying
-stopped_at: Phase 04 automatic candidate build and Docker-network OneBot protocol UAT passed; real QQ delivery remains external
-last_updated: "2026-07-19T20:05:00.000Z"
-last_activity: 2026-07-19
-last_activity_desc: Implemented Phase 4 gap-closure runner evidence and review boundary; real OneBot UAT remains pending
+status: deployed_with_followups
+stopped_at: Deployed to up.dh891.top; QQ official private notify verified; planning docs partially reconciled
+last_updated: "2026-07-21T14:00:00.000Z"
+last_activity: 2026-07-21
+last_activity_desc: Replaced ratio-watch with upstream-ops; shipped qqofficial notify; forked/pushed/merged/tag; fixed admin password source
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 12
   completed_plans: 12
   percent: 100
@@ -21,67 +21,70 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-18)
+See: `.planning/PROJECT.md`  
+**Decisions source of truth:** `.planning/DECISIONS.md`
 
-**Core value:** 运维者能够安全、快速地发现上游渠道故障，批量修复或同步，并在变更前后可靠地验证与恢复数据。
-**Current focus:** Phase 04 — 可审查发布候选
+**Core value:** 运维者能够安全、快速地发现上游渠道故障，批量修复或同步，并在变更前后可靠地验证与恢复数据。  
+**Current focus:** Follow-ups after v0.0.6-ops.1 deploy (group QQ notify, optional GHCR image, secret rotation)
 
 ## Current Position
 
-Phase: 04 (可审查发布候选) — READY
-Plan: 3 of 3
-Status: Automatic candidate verification complete; Phase 2 real OneBot UAT remains explicitly pending
-Last activity: 2026-07-19 - Phase 3 recovery drill and Playwright evidence recorded
+Phase: 04 (可审查发布候选) — **DEPLOYED**  
+Status: Live on `https://up.dh891.top` with auth, 14 channels, and verified QQ official private notification  
+Last activity: 2026-07-21 — direction locked to upstream-ops; ratio-watch archived
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100% of planned phases executed; residual follow-ups listed below
 
-## Performance Metrics
+## Live deployment
 
-**Velocity:**
+| Item | Value |
+|------|-------|
+| URL | https://up.dh891.top |
+| Host path | `/opt/upstream-ops` |
+| Image | `upstream-ops:local` |
+| Auth | enabled (`/api/channels` → 401 anonymous) |
+| Channels | 14 |
+| Notify | `QQ官方-私聊` (`qqofficial`, enabled) |
+| NapCat | stopped (abandoned) |
+| Ratio-watch | backed up and removed from service |
 
-- Total plans completed: 8
-- Average duration: -
-- Total execution time: 0 hours
+## Repository
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-**Recent Trend:**
-
-- Last 5 plans: 03-01, 03-02, 03-03, with automatic gates passed
-- Trend: steady
+| Item | Value |
+|------|-------|
+| Main dir | `E:\www\upstream-ops` |
+| Fork | https://github.com/owen891/upstream-ops |
+| Official upstream | https://github.com/bejix/upstream-ops |
+| PR | https://github.com/owen891/upstream-ops/pull/1 (merged) |
+| Tag | `v0.0.6-ops.1` |
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
+All standing decisions are in [`.planning/DECISIONS.md`](DECISIONS.md).
 
-- [Roadmap]: 使用 4 个粗粒度垂直阶段，每个阶段交付可验证的运维或发布结果。
-- [Baseline]: 当前分支已有 P0 实现和未提交的发布收口改动，但在对应验证证据落盘前不把任何阶段标记为完成。
-- [Release]: 阶段按自动门禁与安全 → 核心运维实测 → 恢复与浏览器 E2E → 干净发布候选顺序执行。
+High-signal:
+- Product base = UpstreamOps, not ratio-watch
+- QQ production path = official bot, not NapCat personal login
+- Fork/publish under owen891; do not assume bejix merge
+- Admin password owned by config.yaml via Settings save+apply
 
-### Pending Todos
+### Open follow-ups
 
-None yet.
+1. Official QQ **group** notification
+2. Optional GHCR image publish for `v0.0.6-ops.1`
+3. Operator secret rotation (admin password / AppSecret / root)
 
-### Blockers/Concerns
-
-- [Phase 1]: 代码地图确认运行时应用会丢失环境变量优先级，且设置读写可能暴露或持久化明文秘密；安全门禁规划必须解决或形成明确的 v1 风险处置结论。
-- [Phase 3]: 当前 SQLite 备份流程可能丢失 WAL 中的数据；恢复需求必须以一致快照和实际数据校验为准，不能仅以脚本退出成功为准。
-- [Phase 4]: 当前工作区包含预期的未提交发布收口改动；发布前需要在保留这些改动的前提下清理意外生成物并确认无敏感文件。
-
-## Deferred Items
+### Deferred Items
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | v2 | OPRL-01 through OPRL-04; MAIN-01 through MAIN-03 | Deferred | Project initialization |
+| old UR | observations / comparisons / route / adjustment platform | Deferred | 2026-07-21 direction pivot |
 
 ## Session Continuity
 
-Last session: 2026-07-18
-Stopped at: Initial roadmap created; Phase 1 is ready for planning
-Resume file: None
+Last session: 2026-07-21  
+Stopped at: Decisions consolidated; live deploy + private QQ notify working  
+Resume file: `.planning/DECISIONS.md`
