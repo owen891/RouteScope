@@ -17,6 +17,8 @@ export type NotificationChannelType =
   | "dingtalk"
   | "feishu"
   | "serverchan3"
+  | "qqbot"
+  | "qqofficial"
 
 export type CaptchaProviderType =
   | "capsolver"
@@ -230,8 +232,16 @@ export interface CostTrendPoint {
 export interface SystemAuthConfig {
   enabled: boolean
   username: string
-  password: string
-  tokenSecret: string
+  passwordConfigured: boolean
+  tokenSecretConfigured: boolean
+  sessionTTLHours: number
+}
+
+export interface SystemAuthConfigInput {
+  enabled: boolean
+  username: string
+  passwordReplacement?: string
+  tokenSecretReplacement?: string
   sessionTTLHours: number
 }
 
@@ -274,7 +284,17 @@ export interface SystemProxyConfig {
   host: string
   port: number
   username: string
-  password: string
+  passwordConfigured: boolean
+}
+
+export interface SystemProxyConfigInput {
+  enabled: boolean
+  versionCheckEnabled: boolean
+  protocol: "http" | "https" | "socks5"
+  host: string
+  port: number
+  username: string
+  passwordReplacement?: string
 }
 
 export interface SystemUpstreamConfig {
@@ -288,6 +308,15 @@ export interface SystemConfig {
   scheduler: SystemSchedulerConfig
   notifications: SystemNotificationsConfig
   proxy: SystemProxyConfig
+  upstream: SystemUpstreamConfig
+}
+
+export interface SystemConfigInput {
+  app: AppConfig
+  auth: SystemAuthConfigInput
+  scheduler: SystemSchedulerConfig
+  notifications: SystemNotificationsConfig
+  proxy: SystemProxyConfigInput
   upstream: SystemUpstreamConfig
 }
 

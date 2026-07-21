@@ -70,6 +70,13 @@ func (s *Service) UpdateUpstreamConfig(cfg config.UpstreamConfig) {
 	s.upstream = cfg.WithDefaults()
 }
 
+// CurrentProxyConfig returns the proxy configuration applied to channel requests.
+func (s *Service) CurrentProxyConfig() config.ProxyConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.proxyConfig
+}
+
 func (s *Service) proxyURL() (string, error) {
 	s.mu.RLock()
 	cfg := s.proxyConfig

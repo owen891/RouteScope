@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  Download,
+  HardDrive,
   Bell,
   Clock3,
   MonitorCog,
@@ -42,6 +44,7 @@ import type {
   NotificationChannel,
   NotificationChannelType,
   SystemConfig,
+  SystemConfigInput,
 } from "@/lib/api-types";
 import { decimal, money, relativeTime } from "@/lib/format";
 import {
@@ -52,6 +55,7 @@ import {
   useSystemConfig,
 } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { formatNotifyTestError } from "@/lib/notify-test-error";
 
 function num(v: string) {
   return Number(v || 0);
@@ -65,6 +69,16 @@ interface ProxyTestResult {
   error?: string;
 }
 
+type SystemConfigForm = Omit<SystemConfig, "auth" | "proxy"> & {
+  auth: SystemConfig["auth"] & {
+    passwordReplacement: string;
+    tokenSecretReplacement: string;
+  };
+  proxy: SystemConfig["proxy"] & {
+    passwordReplacement: string;
+  };
+};
+
 export default function SettingsPage() {
   const query = useSystemConfig();
   const notifications = useNotificationChannels();
@@ -73,7 +87,7 @@ export default function SettingsPage() {
   const appVersion = useAppVersion();
   const refresh = useTriggerRefresh();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const [form, setForm] = useState<SystemConfig | null>(null);
+  const [form, setForm] = useState<SystemConfigForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [configSavedPendingApply, setConfigSavedPendingApply] = useState(false);
@@ -92,10 +106,25 @@ export default function SettingsPage() {
   const [busyCaptchaID, setBusyCaptchaID] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState("system");
   const [versionInfo, setVersionInfo] = useState<AppVersion | null>(null);
+  const [anonProbe, setAnonProbe] = useState<
+    "unknown" | "open" | "protected" | "error"
+  >("unknown");
+  const [probingAnon, setProbingAnon] = useState(false);
 
   useEffect(() => {
     if (query.data?.config) {
-      setForm(query.data.config);
+      setForm({
+        ...query.data.config,
+        auth: {
+          ...query.data.config.auth,
+          passwordReplacement: "",
+          tokenSecretReplacement: "",
+        },
+        proxy: {
+          ...query.data.config.proxy,
+          passwordReplacement: "",
+        },
+      });
     }
   }, [query.data]);
 
@@ -104,6 +133,28 @@ export default function SettingsPage() {
       setVersionInfo(appVersion.data);
     }
   }, [appVersion.data]);
+
+  async function probeAnonymousAccess() {
+    setProbingAnon(true);
+    try {
+      // Intentionally omit Authorization to detect real API protection.
+      const res = await fetch("/api/channels", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (res.status === 401) setAnonProbe("protected");
+      else if (res.ok) setAnonProbe("open");
+      else setAnonProbe("error");
+    } catch {
+      setAnonProbe("error");
+    } finally {
+      setProbingAnon(false);
+    }
+  }
+
+  useEffect(() => {
+    void probeAnonymousAccess();
+  }, []);
 
   if (query.loading && !form) {
     return (
@@ -158,11 +209,14 @@ export default function SettingsPage() {
       if (res.ok) {
         toast.success(`已发送测试消息到 ${channel.name}`);
       } else {
-        toast.error(res.error ?? "测试失败");
+        toast.error(
+          formatNotifyTestError(channel.type, res.error ?? "测试失败"),
+        );
       }
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "测试失败");
+      const raw = err instanceof Error ? err.message : "测试失败";
+      toast.error(formatNotifyTestError(channel.type, raw));
     } finally {
       setBusyNotificationID(null);
     }
@@ -208,12 +262,62 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
+    if (
+      form?.auth.enabled &&
+      !form.auth.passwordConfigured &&
+      !form.auth.passwordReplacement.trim()
+    ) {
+      toast.warning("已启用鉴权：若是首次开启，请填写管理员密码后再保存")
+    }
+    if (!form) return;
+
+    const payload: SystemConfigInput = {
+      app: form.app,
+      auth: {
+        enabled: form.auth.enabled,
+        username: form.auth.username,
+        sessionTTLHours: form.auth.sessionTTLHours,
+        ...(form.auth.passwordReplacement.trim()
+          ? { passwordReplacement: form.auth.passwordReplacement }
+          : {}),
+        ...(form.auth.tokenSecretReplacement.trim()
+          ? { tokenSecretReplacement: form.auth.tokenSecretReplacement }
+          : {}),
+      },
+      scheduler: form.scheduler,
+      notifications: form.notifications,
+      proxy: {
+        enabled: form.proxy.enabled,
+        versionCheckEnabled: form.proxy.versionCheckEnabled,
+        protocol: form.proxy.protocol,
+        host: form.proxy.host,
+        port: form.proxy.port,
+        username: form.proxy.username,
+        ...(form.proxy.passwordReplacement.trim()
+          ? { passwordReplacement: form.proxy.passwordReplacement }
+          : {}),
+      },
+      upstream: form.upstream,
+    };
     setSaving(true);
     try {
       await apiFetch("/settings/config", {
         method: "PUT",
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
+      setForm((prev) =>
+        prev
+          ? {
+              ...prev,
+              auth: {
+                ...prev.auth,
+                passwordReplacement: "",
+                tokenSecretReplacement: "",
+              },
+              proxy: { ...prev.proxy, passwordReplacement: "" },
+            }
+          : prev,
+      );
       toast.success("已写入配置文件");
       setConfigSavedPendingApply(true);
       query.refetch();
@@ -247,7 +351,19 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<ProxyTestResult>("/settings/proxy/test", {
         method: "POST",
-        body: JSON.stringify(form?.proxy ?? {}),
+        body: JSON.stringify(
+          form
+            ? {
+                enabled: form.proxy.enabled,
+                versionCheckEnabled: form.proxy.versionCheckEnabled,
+                protocol: form.proxy.protocol,
+                host: form.proxy.host,
+                port: form.proxy.port,
+                username: form.proxy.username,
+                password: form.proxy.passwordReplacement,
+              }
+            : {},
+        ),
       });
       if (result.ok) {
         toast.success(
@@ -329,6 +445,19 @@ export default function SettingsPage() {
                 description="控制页面标题和通知标题前缀。"
               >
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "border-transparent",
+                      form.auth.enabled
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-800",
+                    )}
+                  >
+                    {form.auth.enabled
+                      ? `鉴权已开启 · 用户 ${form.auth.username || "admin"}`
+                      : "鉴权已关闭 · 所有 /api 可匿名访问"}
+                  </Badge>
                   <Badge variant="outline" className="border-border bg-background">
                     当前版本 {versionInfo?.version || "加载中"}
                   </Badge>
@@ -426,9 +555,16 @@ export default function SettingsPage() {
                     )
                   }
                 />
-                <NoteBox title="热应用说明">
-                  应用后新的鉴权配置立即生效，现有无效令牌会在后续请求时被拦截。
-                </NoteBox>
+                {form.auth.enabled ? (
+                  <NoteBox title="热应用说明">
+                    应用后新的鉴权配置立即生效。请先填写管理员密码再保存并应用；仅改配置文件而容器
+                    环境变量 AUTH_ENABLED 未开时，部分部署仍可能匿名访问 API，请以实际登录页为准。
+                  </NoteBox>
+                ) : (
+                  <NoteBox title="安全风险">
+                    当前鉴权关闭，所有 /api 可匿名访问。仅建议本机调试；对外暴露前请开启鉴权、设置强密码，并保存后点击「应用」。
+                  </NoteBox>
+                )}
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <Field
@@ -473,16 +609,28 @@ export default function SettingsPage() {
                 </Field>
                 <Field
                   label="管理员密码"
-                  description="保存后写入配置文件，应用后用于新登录。"
+                  description={
+                    form.auth.passwordConfigured
+                      ? "密码已配置；留空保持不变，输入内容仅用于替换。"
+                      : "尚未配置密码；启用鉴权前请输入新密码。"
+                  }
                 >
                   <Input
-                    value={form.auth.password}
+                    type="password"
+                    autoComplete="new-password"
+                    value={form.auth.passwordReplacement}
+                    placeholder={
+                      form.auth.passwordConfigured ? "已配置，留空不变" : "输入新密码"
+                    }
                     onChange={(e) =>
                       setForm((prev) =>
                         prev
                           ? {
                               ...prev,
-                              auth: { ...prev.auth, password: e.target.value },
+                              auth: {
+                                ...prev.auth,
+                                passwordReplacement: e.target.value,
+                              },
                             }
                           : prev,
                       )
@@ -491,10 +639,21 @@ export default function SettingsPage() {
                 </Field>
                 <Field
                   label="令牌签名密钥"
-                  description="留空时回退使用安全主密钥。"
+                  description={
+                    form.auth.tokenSecretConfigured
+                      ? "签名密钥已配置；留空保持不变，输入内容仅用于替换。"
+                      : "未单独配置时由后端回退到安全主密钥。"
+                  }
                 >
                   <Input
-                    value={form.auth.tokenSecret}
+                    type="password"
+                    autoComplete="new-password"
+                    value={form.auth.tokenSecretReplacement}
+                    placeholder={
+                      form.auth.tokenSecretConfigured
+                        ? "已配置，留空不变"
+                        : "可选：输入独立签名密钥"
+                    }
                     onChange={(e) =>
                       setForm((prev) =>
                         prev
@@ -502,7 +661,7 @@ export default function SettingsPage() {
                               ...prev,
                               auth: {
                                 ...prev.auth,
-                                tokenSecret: e.target.value,
+                                tokenSecretReplacement: e.target.value,
                               },
                             }
                           : prev,
@@ -1078,16 +1237,30 @@ export default function SettingsPage() {
                   }
                 />
               </Field>
-              <Field label="密码（可选）" description="代理认证密码。">
+              <Field
+                label="密码（可选）"
+                description={
+                  form.proxy.passwordConfigured
+                    ? "代理密码已配置；留空保持不变，输入内容仅用于替换。"
+                    : "尚未配置代理认证密码。"
+                }
+              >
                 <Input
                   type="password"
-                  value={form.proxy.password}
+                  autoComplete="new-password"
+                  value={form.proxy.passwordReplacement}
+                  placeholder={
+                    form.proxy.passwordConfigured ? "已配置，留空不变" : "输入代理密码"
+                  }
                   onChange={(e) =>
                     setForm((prev) =>
                       prev
                         ? {
                             ...prev,
-                            proxy: { ...prev.proxy, password: e.target.value },
+                            proxy: {
+                              ...prev.proxy,
+                              passwordReplacement: e.target.value,
+                            },
                           }
                         : prev,
                     )
@@ -1095,6 +1268,233 @@ export default function SettingsPage() {
                 />
               </Field>
             </div>
+          </SectionCard>
+
+          <SectionCard
+            icon={<HardDrive className="size-4 text-slate-600" />}
+            title="数据与备份"
+            description="渠道、会话、快照等保存在数据目录；配置文件路径见页面顶部。生产环境请定期备份。"
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <NoteBox title="建议备份内容">
+                <ul className="mt-1 list-disc space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+                  <li>
+                    <code className="text-[11px]">data/upstream-ops.db</code>
+                    （及可选的 <code className="text-[11px]">-wal/-shm</code>）
+                  </li>
+                  <li>
+                    <code className="text-[11px]">data/config.yaml</code>
+                  </li>
+                  <li>
+                    Docker 示例：
+                    <code className="mt-1 block whitespace-pre-wrap break-all text-[11px]">
+                      docker compose exec app wget -q -O- http://localhost:8418/healthz
+                    </code>
+                    停机或热拷贝 <code className="text-[11px]">./data</code> 目录即可。
+                  </li>
+                </ul>
+              </NoteBox>
+              <div className="space-y-3">
+                <NoteBox title="当前部署">
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    配置路径：
+                    <span className="font-mono text-[11px] text-foreground">
+                      {query.data?.config_path ?? "—"}
+                    </span>
+                    <br />
+                    鉴权状态：
+                    <span className="font-medium text-foreground">
+                      {form.auth.enabled ? "已开启" : "已关闭（仅建议本机）"}
+                    </span>
+                  </p>
+                </NoteBox>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => {
+                    const payload = {
+                      exported_at: new Date().toISOString(),
+                      config_path: query.data?.config_path ?? null,
+                      // 导出结构按字段白名单构造，瞬时替换值不会进入文件。
+                      config: {
+                        app: form.app,
+                        auth: {
+                          enabled: form.auth.enabled,
+                          username: form.auth.username,
+                          passwordConfigured: form.auth.passwordConfigured,
+                          tokenSecretConfigured:
+                            form.auth.tokenSecretConfigured,
+                          sessionTTLHours: form.auth.sessionTTLHours,
+                        },
+                        scheduler: form.scheduler,
+                        notifications: form.notifications,
+                        proxy: {
+                          enabled: form.proxy.enabled,
+                          versionCheckEnabled:
+                            form.proxy.versionCheckEnabled,
+                          protocol: form.proxy.protocol,
+                          host: form.proxy.host,
+                          port: form.proxy.port,
+                          username: form.proxy.username,
+                          passwordConfigured:
+                            form.proxy.passwordConfigured,
+                        },
+                        upstream: form.upstream,
+                      },
+                    }
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+                      type: "application/json",
+                    })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.download = `upstream-ops-config-${new Date()
+                      .toISOString()
+                      .slice(0, 10)}.json`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                    toast.success("已下载脱敏配置（不含密码）")
+                  }}
+                >
+                  <Download className="size-3.5" />
+                  下载脱敏配置 JSON
+                </Button>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            icon={<ShieldCheck className="size-4 text-rose-600" />}
+            title="生产检查清单"
+            description="对外暴露或 7×24 运行前，按下列项自检。改 compose 环境变量后需要重建/重启容器。"
+          >
+            <ul className="space-y-2 text-xs leading-5 text-muted-foreground">
+              <li className="flex gap-2">
+                <span className={form.auth.enabled ? "text-emerald-600" : "text-amber-700"}>
+                  {form.auth.enabled ? "✓" : "!"}
+                </span>
+                <span>
+                  <strong className="text-foreground">登录鉴权（配置）</strong>
+                  ：当前 {form.auth.enabled ? "已在配置中开启" : "关闭（配置层允许匿名）"}。
+                  生产请开启并设置强密码，保存后点「应用」；同时确认 `.env` 中
+                  <code className="mx-1 text-[11px]">AUTH_ENABLED=true</code>
+                  与容器环境一致。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span
+                  className={
+                    anonProbe === "protected"
+                      ? "text-emerald-600"
+                      : anonProbe === "open"
+                        ? "text-amber-700"
+                        : "text-muted-foreground"
+                  }
+                >
+                  {anonProbe === "protected" ? "✓" : anonProbe === "open" ? "!" : "•"}
+                </span>
+                <span>
+                  <strong className="text-foreground">匿名 API 实测</strong>
+                  ：
+                  {anonProbe === "unknown" && "检测中…"}
+                  {anonProbe === "protected" && "未带 Token 访问 /api/channels 返回 401（受保护）"}
+                  {anonProbe === "open" &&
+                    "未带 Token 仍可访问 /api/channels（当前可匿名调用）"}
+                  {anonProbe === "error" && "探测失败，请手动检查网络"}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-2 h-6 px-2 text-[11px]"
+                    disabled={probingAnon}
+                    onClick={() => void probeAnonymousAccess()}
+                  >
+                    {probingAnon ? "检测中" : "重新检测"}
+                  </Button>
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">密钥</strong>
+                  ：轮换 <code className="text-[11px]">APP_SECRET</code> /
+                  <code className="text-[11px]">AUTH_TOKEN_SECRET</code> 后旧会话会失效，需重新登录。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">备份演练</strong>
+                  ：升级前备份
+                  <code className="mx-1 text-[11px]">data/upstream-ops.db</code>
+                  与
+                  <code className="mx-1 text-[11px]">data/config.yaml</code>
+                  。推荐脚本
+                  <code className="mx-1 text-[11px]">./scripts/backup-data.sh backup</code>
+                  ，或复制下方命令。
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 h-7 gap-1.5 px-2 text-[11px]"
+                    onClick={async () => {
+                      const cmd = [
+                        "# 推荐：",
+                        "./scripts/backup-data.sh backup",
+                        "./scripts/backup-data.sh list",
+                        "# 恢复：./scripts/backup-data.sh restore 20260718_120000",
+                        "",
+                        "# 或手动：",
+                        "mkdir -p data/backups",
+                        "cp -a data/upstream-ops.db data/backups/upstream-ops.db.$(date +%Y%m%d_%H%M%S)",
+                        "cp -a data/config.yaml data/backups/config.yaml.$(date +%Y%m%d_%H%M%S)",
+                        "# docker compose stop app",
+                        "# cp data/backups/upstream-ops.db.XXXX data/upstream-ops.db",
+                        "# docker compose up -d",
+                      ].join("\n")
+                      try {
+                        await navigator.clipboard.writeText(cmd)
+                        toast.success("已复制备份/恢复命令到剪贴板")
+                        window.localStorage.setItem(
+                          "uh_last_backup_drill_copy",
+                          new Date().toISOString(),
+                        )
+                      } catch {
+                        toast.message(cmd)
+                      }
+                    }}
+                  >
+                    复制备份命令
+                  </Button>
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">通知</strong>
+                  ：至少配置一个可用渠道（Telegram / QQ OneBot / Webhook 等）并点「测试」验证。
+                  Docker 内 QQ 机器人请用
+                  <code className="mx-1 text-[11px]">host.docker.internal</code>
+                  或宿主机 IP。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-muted-foreground">•</span>
+                <span>
+                  <strong className="text-foreground">端口暴露</strong>
+                  ：勿将未鉴权实例直接映射到公网；必要时前置反向代理与 HTTPS。
+                </span>
+              </li>
+            </ul>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              更完整说明见仓库 <code className="text-[11px]">docs/FORK_NOTES.md</code>。
+              {typeof window !== "undefined" &&
+              window.localStorage.getItem("uh_last_backup_drill_copy")
+                ? ` 最近复制备份命令：${window.localStorage.getItem("uh_last_backup_drill_copy")}`
+                : ""}
+            </p>
           </SectionCard>
 
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
@@ -1593,6 +1993,8 @@ function typeLabel(type: NotificationChannelType) {
     dingtalk: "钉钉",
     feishu: "飞书",
     serverchan3: "Server酱³",
+    qqbot: "QQ 机器人 (OneBot)",
+    qqofficial: "QQ 官方机器人",
   };
   return map[type] ?? type;
 }
@@ -1622,6 +2024,8 @@ function notifyIcon(type: NotificationChannelType) {
     dingtalk: Send,
     feishu: Send,
     serverchan3: Send,
+    qqbot: Send,
+    qqofficial: Send,
   };
   return map[type] ?? Send;
 }

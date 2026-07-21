@@ -68,3 +68,22 @@ cmd/seed-demo/
 frontend/tsconfig.tsbuildinfo
 
 docs/md
+# Local ops / second-fork tooling (do not commit)
+_preview_proxy.py
+upstream-ops-linux
+docker-compose.override.yml
+data/backups/
+*.db
+*.db-shm
+*.db-wal
+.uat/
+.uat-evidence-*.json
+
+# Local deploy / bot packaging artifacts
+*.tgz
+napcat-chunks/
+napcat-qrcode.png
+.deploy-stage/
+.deploy-admin-password.txt
+upstream-ops-image.tgz
+napcat-image.tgz

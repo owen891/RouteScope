@@ -220,6 +220,8 @@ Saving writes the configuration file. Applying settings hot-reloads authenticati
 
 ## Quick Start
 
+For the release, upgrade, backup, rollback, and candidate verification procedure, see [`docs/RELEASE.md`](docs/RELEASE.md).
+
 ### Docker Compose with SQLite
 
 SQLite is the default deployment mode.

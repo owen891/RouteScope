@@ -47,7 +47,12 @@ func main() {
 	log.Info("starting UpstreamOps", "port", cfg.Server.Port, "mode", cfg.Server.Mode)
 
 	if _, err := os.Stat(resolvedConfigPath); errors.Is(err, os.ErrNotExist) {
-		if err := config.Save(resolvedConfigPath, cfg); err != nil {
+		fileCfg, err := config.LoadFile(resolvedConfigPath)
+		if err != nil {
+			log.Error("prepare config baseline failed", "path", resolvedConfigPath, "err", err)
+			os.Exit(1)
+		}
+		if err := config.Save(resolvedConfigPath, fileCfg); err != nil {
 			log.Error("create config failed", "path", resolvedConfigPath, "err", err)
 			os.Exit(1)
 		}

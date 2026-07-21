@@ -1,0 +1,5 @@
+# Copy to docker-compose.override.yml for local second-fork image.
+# docker-compose.override.yml is gitignored.
+services:
+  app:
+    image: upstream-ops:local
