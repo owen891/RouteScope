@@ -269,6 +269,7 @@ export interface SystemNotificationsConfig {
   batchRateChanges: boolean
   minChangePct: number
   balanceLowCooldownMinutes: number
+  loginFailedCooldownMinutes: number
   subscriptionDailyRemainingThresholdPct: number
   subscriptionWeeklyRemainingThresholdPct: number
   subscriptionMonthlyRemainingThresholdPct: number

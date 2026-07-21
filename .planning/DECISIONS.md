@@ -55,6 +55,14 @@ Not current work unless re-opened:
 - Frontend chunk split under 500KB warning
 - Supply-chain scanning / SBOM
 
+## Notification content decisions (2026-07-21)
+
+| # | Decision | Status | Notes |
+|---|----------|--------|-------|
+| C1 | 倍率变化 P1 **不另做延迟汇总**，同一次扫描仍一起发 | **Accepted** | keep BatchRateChanges |
+| C2 | 通知正文必须带 **余额 + 倍率**，并统一排版 | **Done** | rate/balance/login messages redesigned |
+| C3 | 登录失败降低频率 | **Done** | `loginFailedCooldownMinutes` default 60 |
+
 ## Open items only
 
 1. QQ **group** official notification (openid + owner setting + test)

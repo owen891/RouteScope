@@ -141,13 +141,10 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 		map[string]any{"today_cost": costRes.TodayCost, "total_cost": costRes.TotalCost})
 
 	if c.BalanceThreshold > 0 && res.Balance < c.BalanceThreshold {
-		body := fmt.Sprintf("当前余额: %.4f，阈值: %.4f", res.Balance, c.BalanceThreshold)
-		_ = s.dispatcher.Dispatch(ctx, notify.Message{
-			Event:     storage.EventBalanceLow,
-			ChannelID: c.ID,
-			Subject:   fmt.Sprintf("%s 余额低于阈值", c.Name),
-			Body:      body,
-		})
+		// Keep channel snapshot in sync so message builders can show latest balance.
+		c.LastBalance = &res.Balance
+		c.LastBalanceAt = &sampledAt
+		_ = s.dispatcher.Dispatch(ctx, notify.BuildBalanceLowMessage(c, res.Balance, c.BalanceThreshold))
 	}
 	return nil
 }
@@ -404,11 +401,24 @@ func (s *Service) prepare(ctx context.Context, c *storage.Channel) (*connector.C
 }
 
 func (s *Service) notifyError(ctx context.Context, c *storage.Channel, event storage.NotificationEvent, subject string, err error) {
+	if event == storage.EventLoginFailed {
+		_ = s.dispatcher.Dispatch(ctx, notify.BuildLoginFailedMessage(c, err))
+		return
+	}
+	reason := ""
+	if err != nil {
+		reason = err.Error()
+	}
+	balance := "—"
+	if c != nil && c.LastBalance != nil {
+		balance = fmt.Sprintf("%.4f", *c.LastBalance)
+	}
+	body := "渠道：" + c.Name + "\n" + "余额：" + balance + "\n" + "事件：" + subject + "\n" + "原因：" + reason + "\n" + "时间：" + time.Now().Format("2006-01-02 15:04")
 	_ = s.dispatcher.Dispatch(ctx, notify.Message{
 		Event:     event,
 		ChannelID: c.ID,
-		Subject:   fmt.Sprintf("%s %s", c.Name, subject),
-		Body:      err.Error(),
+		Subject:   fmt.Sprintf("%s · %s", subject, c.Name),
+		Body:      body,
 	})
 }
 
