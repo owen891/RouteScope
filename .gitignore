@@ -78,3 +78,12 @@ data/backups/
 *.db-wal
 .uat/
 .uat-evidence-*.json
+
+# Local deploy / bot packaging artifacts
+*.tgz
+napcat-chunks/
+napcat-qrcode.png
+.deploy-stage/
+.deploy-admin-password.txt
+upstream-ops-image.tgz
+napcat-image.tgz

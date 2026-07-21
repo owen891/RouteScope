@@ -1993,7 +1993,8 @@ function typeLabel(type: NotificationChannelType) {
     dingtalk: "钉钉",
     feishu: "飞书",
     serverchan3: "Server酱³",
-    qqbot: "QQ 机器人",
+    qqbot: "QQ 机器人 (OneBot)",
+    qqofficial: "QQ 官方机器人",
   };
   return map[type] ?? type;
 }
@@ -2024,6 +2025,7 @@ function notifyIcon(type: NotificationChannelType) {
     feishu: Send,
     serverchan3: Send,
     qqbot: Send,
+    qqofficial: Send,
   };
   return map[type] ?? Send;
 }
