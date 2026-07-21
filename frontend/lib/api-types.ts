@@ -28,6 +28,49 @@ export type CaptchaProviderType =
 
 export type MonitorJob = "login" | "balance" | "rates"
 
+export type ObservationKind = "balance" | "rate" | "health" | "announcement" | "cost"
+
+export type ObservationSource = "schedule" | "manual" | "probe"
+
+export interface Observation {
+  id: number
+  channel_id: number
+  kind: ObservationKind
+  source: ObservationSource
+  success: boolean
+  summary?: string
+  payload_json?: string
+  error_class?: string
+  error_message?: string
+  sampled_at: string
+  created_at: string
+}
+
+export interface HealthProbeConfig {
+  id: number
+  name: string
+  channel_id?: number | null
+  url?: string
+  enabled: boolean
+  timeout_ms: number
+  created_at: string
+  updated_at: string
+}
+
+export interface HealthProbeRun {
+  id: number
+  config_id: number
+  channel_id?: number | null
+  url: string
+  success: boolean
+  status_code?: number
+  latency_ms: number
+  error_class?: string
+  error_message?: string
+  started_at: string
+  finished_at: string
+}
+
 export type NotificationEvent =
   | "balance_low"
   | "rate_changed"

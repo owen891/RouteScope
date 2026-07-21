@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
+  Activity,
   Bell,
   LayoutDashboard,
   Plus,
@@ -170,6 +171,12 @@ export function DockBar() {
       label: "通知渠道",
       path: "/notifications",
       gradient: "from-amber-300 via-orange-500 to-rose-500",
+    },
+    {
+      icon: Activity,
+      label: "观测事实",
+      path: "/observations",
+      gradient: "from-cyan-400 via-sky-500 to-blue-600",
     },
     {
       icon: Settings,
