@@ -74,6 +74,12 @@ interface ConfigState {
   qq_message_type: "group" | "private"
   qq_group_id: string
   qq_user_id: string
+  // QQ Official Open Platform bot
+  qq_off_app_id: string
+  qq_off_app_secret: string
+  qq_off_message_type: "group" | "private"
+  qq_off_group_openid: string
+  qq_off_user_openid: string
 }
 
 interface SubRow {
@@ -118,6 +124,11 @@ function emptyConfig(): ConfigState {
     qq_message_type: "group",
     qq_group_id: "",
     qq_user_id: "",
+    qq_off_app_id: "",
+    qq_off_app_secret: "",
+    qq_off_message_type: "private",
+    qq_off_group_openid: "",
+    qq_off_user_openid: "",
   }
 }
 
@@ -266,6 +277,23 @@ function buildConfigByType(type: NotificationChannelType, cfg: ConfigState): str
       }
       return JSON.stringify(body)
     }
+    case "qqofficial": {
+      const body: Record<string, unknown> = {
+        app_id: cfg.qq_off_app_id.trim(),
+        app_secret: cfg.qq_off_app_secret.trim(),
+        message_type: cfg.qq_off_message_type,
+      }
+      if (!cfg.qq_off_app_id.trim()) throw new Error("AppID 必填")
+      if (!cfg.qq_off_app_secret.trim()) throw new Error("AppSecret 必填")
+      if (cfg.qq_off_message_type === "group") {
+        if (!cfg.qq_off_group_openid.trim()) throw new Error("群 openid 必填")
+        body.group_openid = cfg.qq_off_group_openid.trim()
+      } else {
+        if (!cfg.qq_off_user_openid.trim()) throw new Error("用户 openid 必填")
+        body.user_openid = cfg.qq_off_user_openid.trim()
+      }
+      return JSON.stringify(body)
+    }
   }
 }
 
@@ -345,6 +373,13 @@ export function NotificationFormDialog({
             return !!(form.cfg.serverchan3_uid || form.cfg.serverchan3_sendkey)
           case "qqbot":
             return !!(form.cfg.qq_base_url || form.cfg.qq_group_id || form.cfg.qq_user_id)
+          case "qqofficial":
+            return !!(
+              form.cfg.qq_off_app_id ||
+              form.cfg.qq_off_app_secret ||
+              form.cfg.qq_off_group_openid ||
+              form.cfg.qq_off_user_openid
+            )
           default:
             return !!form.cfg.webhook_url
         }
@@ -441,6 +476,7 @@ export function NotificationFormDialog({
                 <SelectItem value="feishu">飞书</SelectItem>
                 <SelectItem value="serverchan3">Server酱³</SelectItem>
                 <SelectItem value="qqbot">QQ 机器人 (OneBot)</SelectItem>
+                <SelectItem value="qqofficial">QQ 官方机器人</SelectItem>
               </SelectContent>
             </Select>
             {isEdit ? (
@@ -766,13 +802,9 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
         <p className="text-xs font-medium text-muted-foreground">QQ 机器人（OneBot HTTP）</p>
         <p className="text-[11px] leading-4 text-muted-foreground">
           兼容 go-cqhttp / NapCat / Lagrange.OneBot 等 OneBot HTTP API。
+          需要登录真实 QQ 号，可能顶掉手机会话；生产更推荐「QQ 官方机器人」。
           默认按「UpstreamOps 在 Docker、机器人在宿主机」填写
           <code className="mx-1 text-[10px]">http://host.docker.internal:5700</code>
-          （Windows/Mac Docker Desktop）。
-          若本机直接跑二进制请改
-          <code className="mx-1 text-[10px]">http://127.0.0.1:端口</code>
-          ；Linux 容器常用宿主机局域网 IP 或
-          <code className="mx-1 text-[10px]">172.17.0.1</code>
           。保存后点渠道列表的「测试」验证。
         </p>
         <div className="space-y-1.5">
@@ -824,7 +856,7 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="group">群消息</SelectItem>
+              <SelectItem value="group">群聊</SelectItem>
               <SelectItem value="private">私聊</SelectItem>
             </SelectContent>
           </Select>
@@ -834,7 +866,7 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
             <Label htmlFor="qq-group">群号 group_id</Label>
             <Input
               id="qq-group"
-              placeholder="例如 123456789"
+              placeholder="123456789"
               value={cfg.qq_group_id}
               onChange={(e) => updateCfg({ qq_group_id: e.target.value })}
               required={!isEdit}
@@ -846,9 +878,88 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
             <Label htmlFor="qq-user">QQ 号 user_id</Label>
             <Input
               id="qq-user"
-              placeholder="例如 10001"
+              placeholder="10001"
               value={cfg.qq_user_id}
               onChange={(e) => updateCfg({ qq_user_id: e.target.value })}
+              required={!isEdit}
+              disabled={disabled}
+            />
+          </div>
+        )}
+        {hint}
+      </div>
+    )
+  }
+
+  if (type === "qqofficial") {
+    return (
+      <div className="space-y-2 rounded-lg border border-border p-3">
+        <p className="text-xs font-medium text-muted-foreground">QQ 官方机器人（开放平台）</p>
+        <p className="text-[11px] leading-4 text-muted-foreground">
+          使用 q.qq.com 的 AppID / AppSecret，不登录个人 QQ、不会顶号。
+          目标必须填平台下发的 <code className="mx-1 text-[10px]">openid</code>
+          （群 openid 或用户 openid），不是数字 QQ 号。
+          主动推送受官方频控限制，群聊需群主开启机器人主动发言。
+        </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="qqo-appid">AppID</Label>
+          <Input
+            id="qqo-appid"
+            placeholder="机器人 AppID"
+            value={cfg.qq_off_app_id}
+            onChange={(e) => updateCfg({ qq_off_app_id: e.target.value })}
+            required={!isEdit}
+            disabled={disabled}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="qqo-secret">AppSecret</Label>
+          <Input
+            id="qqo-secret"
+            type="password"
+            placeholder="机器人 AppSecret"
+            value={cfg.qq_off_app_secret}
+            onChange={(e) => updateCfg({ qq_off_app_secret: e.target.value })}
+            required={!isEdit}
+            disabled={disabled}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>消息类型</Label>
+          <Select
+            value={cfg.qq_off_message_type}
+            onValueChange={(v) => updateCfg({ qq_off_message_type: v as "group" | "private" })}
+            disabled={disabled}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="private">私聊（C2C）</SelectItem>
+              <SelectItem value="group">群聊</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {cfg.qq_off_message_type === "group" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="qqo-group">群 openid</Label>
+            <Input
+              id="qqo-group"
+              placeholder="group_openid"
+              value={cfg.qq_off_group_openid}
+              onChange={(e) => updateCfg({ qq_off_group_openid: e.target.value })}
+              required={!isEdit}
+              disabled={disabled}
+            />
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Label htmlFor="qqo-user">用户 openid</Label>
+            <Input
+              id="qqo-user"
+              placeholder="user openid / member_openid"
+              value={cfg.qq_off_user_openid}
+              onChange={(e) => updateCfg({ qq_off_user_openid: e.target.value })}
               required={!isEdit}
               disabled={disabled}
             />

@@ -194,6 +194,8 @@ const (
 	NotifyServerChan3 NotificationChannelType = "serverchan3"
 	// NotifyQQBot is OneBot v11 HTTP API (go-cqhttp / NapCat / Lagrange.OneBot, etc.).
 	NotifyQQBot NotificationChannelType = "qqbot"
+	// NotifyQQOfficial is QQ Open Platform bot API (AppID/Secret, no personal QQ login).
+	NotifyQQOfficial NotificationChannelType = "qqofficial"
 )
 
 // NotificationChannel 通知渠道配置。ConfigCipher 加密保存 JSON 配置（含 token / webhook url / 密码等）。

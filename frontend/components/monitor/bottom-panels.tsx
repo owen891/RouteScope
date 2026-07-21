@@ -670,6 +670,7 @@ const notifyTypeIcon: Partial<Record<NotificationChannelType, LucideIcon>> = {
   feishu: Send,
   serverchan3: Send,
   qqbot: Send,
+  qqofficial: Send,
 }
 
 export function NotificationStatus() {

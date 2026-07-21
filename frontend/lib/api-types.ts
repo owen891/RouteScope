@@ -18,6 +18,7 @@ export type NotificationChannelType =
   | "feishu"
   | "serverchan3"
   | "qqbot"
+  | "qqofficial"
 
 export type CaptchaProviderType =
   | "capsolver"
