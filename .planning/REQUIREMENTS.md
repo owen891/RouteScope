@@ -77,7 +77,13 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 ## v2 Requirements
 
-Deferred until after the first local-ops release.
+Deferred after `v0.0.6-ops.1`. Split into:
+
+1. **Decision Layer (next product milestone, formalized)**  
+   See [REQUIREMENTS-v0.1-decision-layer.md](REQUIREMENTS-v0.1-decision-layer.md)  
+   Covers observations / comparisons / route advice / adjustment audit (OBS/CMP/RTE/ADJ/UX).
+
+2. **Operational Reliability & Maintainability (still deferred)**
 
 ### Operational Reliability
 
@@ -91,6 +97,16 @@ Deferred until after the first local-ops release.
 - **MAIN-01**: 大型同步服务和前端页面按用例边界拆分，同时保持现有 API 合同
 - **MAIN-02**: 前端路由和重依赖按需加载，主 JavaScript chunk 不再触发 500 KB 警告
 - **MAIN-03**: 依赖和容器镜像加入漏洞扫描与可追溯供应链元数据
+
+### Decision Layer (promoted to formal next milestone)
+
+Do not treat these as vague backlog anymore. Formal IDs live in `REQUIREMENTS-v0.1-decision-layer.md`:
+
+- Observations: OBS-01 … OBS-04
+- Comparisons: CMP-01 … CMP-04
+- Route advice: RTE-01 … RTE-04
+- Adjustment audit: ADJ-01 … ADJ-05
+- UX guardrails: UX-01 … UX-03
 
 ## Out of Scope
 
@@ -136,4 +152,4 @@ Deferred until after the first local-ops release.
 
 ---
 *Requirements defined: 2026-07-18*
-*Last updated: 2026-07-21 after live deploy and decisions consolidation*
+*Last updated: 2026-07-21 after promoting UR decision-layer requirements to formal next milestone*

@@ -95,8 +95,27 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 3. 可恢复部署与浏览器验证 | 3/3 | Complete | 2026-07-19 |
 | 4. 可审查发布候选 | 4/4 | Deployed (`v0.0.6-ops.1`, up.dh891.top) | 2026-07-21 |
 
-Follow-ups (not phase blockers): QQ official group notify, optional GHCR image, operator secret rotation.
+Follow-ups for v0.0.6-ops.1 (not phase blockers): QQ official group notify, optional GHCR image, operator secret rotation.
+
+## Next Milestone: Decision Layer (v0.1.0)
+
+Formal requirements: [REQUIREMENTS-v0.1-decision-layer.md](REQUIREMENTS-v0.1-decision-layer.md)
+
+- [ ] **Phase 5: Observation Foundation** - 统一沉淀 balance/rate/health/announcement observations 与健康探测记录。
+- [ ] **Phase 6: Comparisons** - 多上游模型/分组倍率横向对比与导出。
+- [ ] **Phase 7: Route Advice** - 基于健康/余额/倍率生成路由候选，支持人工确认 primary route。
+- [ ] **Phase 8: Adjustment Audit** - 调价 dry-run、执行确认、审计与回滚。
+
+Execution order: 5 → 6 → 7 → 8.  
+Base remains UpstreamOps; historical UR docs are intent only.
+
+| Phase | Plans Complete | Status | Target |
+|-------|----------------|--------|--------|
+| 5. Observation Foundation | 0/? | Planned | after v0.0.6-ops.1 hotfixes |
+| 6. Comparisons | 0/? | Planned | after Phase 5 |
+| 7. Route Advice | 0/? | Planned | after Phase 6 |
+| 8. Adjustment Audit | 0/? | Planned | after Phase 7 |
 
 ---
 *Roadmap created: 2026-07-18*
-*Last updated: 2026-07-21 after live deploy and decisions consolidation*
+*Last updated: 2026-07-21 after formalizing decision-layer next milestone*

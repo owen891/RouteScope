@@ -44,16 +44,25 @@ Do not rediscover these from chat history.
 | R3 | 服务器当前跑本地镜像 `upstream-ops:local` | **Accepted interim** | GHCR publish optional follow-up |
 | R4 | 规划文档需与线上真实状态对齐 | **Done** | DECISIONS/STATE/PROJECT/REQUIREMENTS/ROADMAP reconciled 2026-07-21 |
 
-## Explicitly deferred (v2 / old UR roadmap)
+## Explicitly deferred (v2 / ops reliability)
 
-Not current work unless re-opened:
+Still deferred (not the decision-layer milestone):
 
-- Observations / comparisons / route advice / adjustment audit platform
-- Import audit + one-click rollback of an import batch
-- Notification delivery history + bounded auto-retry productization
-- Backup retention policy + scheduled backups
-- Frontend chunk split under 500KB warning
-- Supply-chain scanning / SBOM
+- Import audit + one-click rollback of an import batch (OPRL-01)
+- Notification delivery history + bounded auto-retry productization (OPRL-02)
+- Backup retention policy + scheduled backups (OPRL-03)
+- Frontend chunk split under 500KB warning (MAIN-02)
+- Supply-chain scanning / SBOM (MAIN-03)
+
+## Next milestone decision (2026-07-21)
+
+| # | Decision | Status | Notes |
+|---|----------|--------|-------|
+| M1 | 下一产品里程碑 = **Decision Layer v0.1.0** | **Accepted** | Formal requirements file created |
+| M2 | 底座继续 **UpstreamOps**，不回到 ratio-watch 主线 | **Accepted** | UR docs are intent source only |
+| M3 | 实施顺序：观测 → 对比 → 路由建议 → 调价审计 | **Accepted** | Phases 5–8 |
+| M4 | 调价默认 dry-run / 二次确认，不做无人值守全自动 | **Accepted** | ADJ-02 |
+| M5 | 决策层需求 ID：OBS/CMP/RTE/ADJ/UX | **Accepted** | See REQUIREMENTS-v0.1-decision-layer.md |
 
 ## Notification content decisions (2026-07-21)
 
@@ -68,6 +77,7 @@ Not current work unless re-opened:
 1. QQ **group** official notification (openid + owner setting + test)
 2. Optional: publish `ghcr.io/owen891/upstream-ops:v0.0.6-ops.1`
 3. Operator secret rotation (admin password, AppSecret, server root)
+4. Start Phase 5 planning for Decision Layer when ready
 
 ## Where things live
 
