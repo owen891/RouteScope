@@ -1,15 +1,20 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
+
+var renameConfigFile = os.Rename
 
 type Config struct {
 	App           AppConfig           `mapstructure:"app" yaml:"app" json:"app"`
@@ -200,27 +205,7 @@ func load(path string, withEnv bool) (*Config, string, error) {
 	setDefaults(v)
 
 	if withEnv {
-		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-		v.AutomaticEnv()
-		// APP_SECRET / ADMIN_USERNAME / ADMIN_PASSWORD / AUTH_ENABLED 是独立约定的环境变量名，不带前缀。
-		_ = v.BindEnv("security.appSecret", "APP_SECRET")
-		_ = v.BindEnv("auth.enabled", "AUTH_ENABLED")
-		_ = v.BindEnv("auth.username", "ADMIN_USERNAME")
-		_ = v.BindEnv("auth.password", "ADMIN_PASSWORD")
-		_ = v.BindEnv("auth.tokenSecret", "AUTH_TOKEN_SECRET")
-		// Viper 坑：AutomaticEnv 只对已通过 SetDefault / BindEnv / 配置文件注册过的 key 生效；
-		// 数据库的 user/password 没有合理的默认值（拒绝写"change-me"作默认），
-		// 因此显式 BindEnv 以确保从环境变量读取。
-		_ = v.BindEnv("database.driver", "DATABASE_DRIVER")
-		_ = v.BindEnv("database.path", "DATABASE_PATH")
-		_ = v.BindEnv("database.host", "DATABASE_HOST")
-		_ = v.BindEnv("database.port", "DATABASE_PORT")
-		_ = v.BindEnv("database.user", "DATABASE_USER")
-		_ = v.BindEnv("database.password", "DATABASE_PASSWORD")
-		_ = v.BindEnv("database.name", "DATABASE_NAME")
-		_ = v.BindEnv("server.port", "SERVER_PORT")
-		_ = v.BindEnv("server.mode", "SERVER_MODE")
-		_ = v.BindEnv("log.level", "LOG_LEVEL")
+		bindEnvironment(v)
 	}
 
 	if err := v.ReadInConfig(); err != nil {
@@ -247,15 +232,112 @@ func Save(path string, cfg *Config) error {
 	if path == "" {
 		return fmt.Errorf("config path is empty")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir config dir: %w", err)
 	}
 	body, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return fmt.Errorf("write config: %w", err)
+
+	// Write a same-directory replacement and rename it only after its contents
+	// are durable. This keeps the last known-good config intact if writing fails.
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary config: %w", err)
+	}
+	tempPath := f.Name()
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("chmod temporary config: %w", err)
+	}
+	if n, err := f.Write(body); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write temporary config: %w", err)
+	} else if n != len(body) {
+		_ = f.Close()
+		return fmt.Errorf("write temporary config: %w", io.ErrShortWrite)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync temporary config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if err := renameConfigFile(tempPath, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	keepTemp = false
+	if err := syncConfigDirectory(dir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ApplyEnvironmentOverrides returns a non-persistent effective configuration.
+// It is used before saving Settings so validation observes the same deployment
+// environment overrides that startup and runtime application will use.
+func ApplyEnvironmentOverrides(fileCfg *Config) (*Config, error) {
+	body, err := yaml.Marshal(fileCfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config for environment overrides: %w", err)
+	}
+
+	v := viper.New()
+	v.SetConfigType("yaml")
+	setDefaults(v)
+	bindEnvironment(v)
+	if err := v.ReadConfig(bytes.NewReader(body)); err != nil {
+		return nil, fmt.Errorf("read in-memory config: %w", err)
+	}
+
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal effective config: %w", err)
+	}
+	cfg.Upstream = cfg.Upstream.WithDefaults()
+	return cfg, nil
+}
+
+func bindEnvironment(v *viper.Viper) {
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+	_ = v.BindEnv("security.appSecret", "APP_SECRET")
+	_ = v.BindEnv("auth.enabled", "AUTH_ENABLED")
+	_ = v.BindEnv("auth.username", "ADMIN_USERNAME")
+	_ = v.BindEnv("auth.password", "ADMIN_PASSWORD")
+	_ = v.BindEnv("auth.tokenSecret", "AUTH_TOKEN_SECRET")
+	_ = v.BindEnv("database.driver", "DATABASE_DRIVER")
+	_ = v.BindEnv("database.path", "DATABASE_PATH")
+	_ = v.BindEnv("database.host", "DATABASE_HOST")
+	_ = v.BindEnv("database.port", "DATABASE_PORT")
+	_ = v.BindEnv("database.user", "DATABASE_USER")
+	_ = v.BindEnv("database.password", "DATABASE_PASSWORD")
+	_ = v.BindEnv("database.name", "DATABASE_NAME")
+	_ = v.BindEnv("server.port", "SERVER_PORT")
+	_ = v.BindEnv("server.mode", "SERVER_MODE")
+	_ = v.BindEnv("log.level", "LOG_LEVEL")
+}
+
+func syncConfigDirectory(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open config dir for sync: %w", err)
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync config dir: %w", err)
 	}
 	return nil
 }
