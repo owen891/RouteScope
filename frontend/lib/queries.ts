@@ -11,8 +11,12 @@ import type {
   ChannelPage,
   CostTrendPoint,
   DashboardSummary,
+  HealthProbeConfig,
+  HealthProbeRun,
   NotificationChannel,
   NotificationLogPage,
+  Observation,
+  ObservationKind,
   RateChangeLogPage,
   RateSnapshot,
   SystemConfigResponse,
@@ -228,6 +232,30 @@ export function useAnnouncements(page = 1, pageSize = 20) {
 
 export function useCaptchaConfigs(enabled = true) {
   return useApi<CaptchaConfig[]>(enabled ? "/captcha-configs" : null)
+}
+
+export function useObservations(opts?: {
+  channelID?: number
+  kind?: ObservationKind | ""
+  limit?: number
+}) {
+  const q = new URLSearchParams()
+  if (opts?.channelID != null) q.set("channel_id", String(opts.channelID))
+  if (opts?.kind) q.set("kind", opts.kind)
+  q.set("limit", String(opts?.limit ?? 100))
+  const qs = q.toString()
+  return useApi<Observation[]>(`/observations?${qs}`)
+}
+
+export function useHealthProbeConfigs() {
+  return useApi<HealthProbeConfig[]>("/health-probes/configs")
+}
+
+export function useHealthProbeRuns(configID?: number, limit = 20) {
+  const q = new URLSearchParams()
+  if (configID != null) q.set("config_id", String(configID))
+  q.set("limit", String(limit))
+  return useApi<HealthProbeRun[]>(`/health-probes/runs?${q.toString()}`)
 }
 
 export function useSystemConfig() {

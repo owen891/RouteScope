@@ -187,6 +187,23 @@ export function MonitorHeader() {
             </TooltipContent>
           </Tooltip>
 
+          <Tooltip delayDuration={200}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => navigate("/observations")}
+                className="size-8 border-border bg-background text-foreground hover:bg-muted"
+                aria-label="观测事实"
+              >
+                <Activity className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {"观测事实"}
+            </TooltipContent>
+          </Tooltip>
+
           {/* settings */}
           <Tooltip delayDuration={200}>
             <TooltipTrigger asChild>
