@@ -22,12 +22,12 @@ UpstreamOps Local Ops Edition 是基于官方 `bejix/upstream-ops` v0.0.6 的自
 
 ### Active
 
-- [ ] all-api-hub v2 备份可以预览并按新增、重命名、跳过或更新策略安全导入
-- [ ] 渠道失败可以分类、筛选、失败优先展示，并支持批量改密、清理登录信息或仅同步失败渠道
-- [ ] QQ OneBot HTTP 通知可以在群聊和私聊场景中可靠发送，并提供可操作的错误提示
-- [ ] 生产部署默认经过鉴权、备份、恢复和匿名 API 检查，不会在未知状态下暴露管理接口
-- [ ] 本地与 CI 使用同一套 lint、单测、构建和 Compose 门禁，镜像发布必须等待门禁通过
-- [ ] 从干净检出可重复构建并发布 `v0.0.6-ops.1`，同时保留回滚到官方 v0.0.6 的路径
+- [x] all-api-hub v2 备份可以预览并按新增、重命名、跳过或更新策略安全导入
+- [x] 渠道失败可以分类、筛选、失败优先展示，并支持批量改密、清理登录信息或仅同步失败渠道
+- [x] QQ 官方机器人私聊通知可用；OneBot 兼容保留；群聊 openid 待补
+- [x] 生产部署默认经过鉴权、备份、恢复和匿名 API 检查，不会在未知状态下暴露管理接口
+- [x] 本地与 CI 使用同一套 lint、单测、构建和 Compose 门禁
+- [x] 已构建并部署 `v0.0.6-ops.1` 候选（fork 已合并打标签）；GHCR 正式镜像可选后续
 
 ### Out of Scope
 
@@ -39,12 +39,11 @@ UpstreamOps Local Ops Edition 是基于官方 `bejix/upstream-ops` v0.0.6 的自
 
 ## Context
 
-- 当前分支 `feat/ops-p0-import-notify` 基于官方 v0.0.6，已有 8 个功能提交，主要实现记录在 `docs/FORK_NOTES.md`。
-- P0 已实现 all-api-hub 导入、失败分类与快捷修复、失败筛选与同步、批量改密、备注标签、紧凑列表、QQ OneBot 通知、生产检查和运维脚本。
-- 代码地图位于 `.planning/codebase/`；后端为 Go 1.23 + Gin + GORM，前端为 React 19 + TypeScript + Vite。
-- 当前未提交收口改动已修复 lint，补充导入、QQ 和鉴权测试，并加入可复用 CI、发布门禁与生产检查脚本。
-- 2026-07-18 本地验证：Go 全量测试、前端 lint、23 个 Vitest 测试、生产构建、Compose 配置和 GitHub Actions 语法通过。
-- 当前本地容器健康，但 `AUTH_ENABLED=false` 且管理员密码为空；匿名 `/api/channels` 返回 200，因此只能视为开发环境，不能视为生产就绪。
+- **主开发目录：** `E:\www\upstream-ops`。`E:\www\UR` 仅历史/设计参考。
+- **线上：** `https://up.dh891.top`，数据 14 渠道，鉴权开启。
+- **Fork：** `owen891/upstream-ops`；标签 `v0.0.6-ops.1`；PR #1 已合并到 fork main。
+- **QQ：** 生产路径为官方开放平台 `qqofficial`；NapCat 个人扫码路径已放弃。
+- 决策总表：`.planning/DECISIONS.md`。
 
 ## Constraints
 
@@ -60,11 +59,14 @@ UpstreamOps Local Ops Edition 是基于官方 `bejix/upstream-ops` v0.0.6 的自
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | 基于官方 v0.0.6 做窄范围运维二改 | 保留成熟监控能力，把投入集中在日常故障处理 | ✓ Good |
-| all-api-hub 备份在浏览器端解析，服务端复用现有渠道 API | 避免新增高权限导入端点和上传原始备份 | — Pending |
+| 主线从 UR/ratio-watch 切到 UpstreamOps | 服务器与开发统一到 up 底座 | ✓ Done 2026-07-21 |
+| all-api-hub 备份在浏览器端解析，服务端复用现有渠道 API | 避免新增高权限导入端点和上传原始备份 | ✓ Good |
 | 敏感凭据进入现有加密字段，导入元数据不得保存备注密码 | 保持统一加密边界并降低泄露风险 | ✓ Good |
 | 生产鉴权不由脚本静默改写 `.env` | 避免生成运维者不知道的密码或把自己锁在系统外 | ✓ Good |
-| 当前里程碑使用粗粒度垂直阶段 | 每个阶段都交付可验证的运维结果，尽快形成可发布版本 | — Pending |
-| 规划文档和代码地图进入 Git | 让后续执行、验证和上游合并有可追溯依据 | — Pending |
+| QQ 生产通知用官方机器人，不用 NapCat 顶个人号 | 稳定性与会话安全 | ✓ Done |
+| 当前里程碑使用粗粒度垂直阶段 | 每个阶段都交付可验证的运维结果 | ✓ Done |
+| 规划文档和代码地图进入 Git | 可追溯 | ✓ Done |
+| 详见 `.planning/DECISIONS.md` | 单一决策源 | ✓ |
 
 ## Evolution
 
@@ -84,4 +86,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-18 after initialization*
+*Last updated: 2026-07-21 after upstream-ops pivot + live deploy*

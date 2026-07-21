@@ -7,9 +7,9 @@
 ## Phases
 
 - [x] **Phase 1: 自动门禁与生产安全** - 让本地、CI 和发布作业共享可阻断的质量门禁，并验证生产鉴权边界。 (completed 2026-07-19)
-- [x] **Phase 2: 核心运维与 OneBot 实测** - 用脱敏导入样本、失败渠道和 OneBot 协议/Compose UAT 完成日常运维工作流；真实 QQ 投递仍需外部 UAT。
-- [x] **Phase 3: 可恢复部署与浏览器验证** - 证明数据可以一致备份和恢复，并用浏览器 E2E 锁定关键路径。（自动验证完成；真实 OneBot 仍待外部 UAT）
-- [ ] **Phase 4: 可审查发布候选** - 从干净检出复现健康镜像，形成可推送、可审查、可打标签的候选版本。（自动候选验证完成；最终 OneBot UAT 待完成）
+- [x] **Phase 2: 核心运维与 OneBot 实测** - 导入/失败运维完成；OneBot 协议保留；官方 QQ 私聊已实测。
+- [x] **Phase 3: 可恢复部署与浏览器验证** - 备份恢复与浏览器 E2E 完成。
+- [x] **Phase 4: 可审查发布候选** - 已部署 `up.dh891.top`，fork 合并并打标签 `v0.0.6-ops.1`。
 
 ## Phase Details
 
@@ -90,10 +90,13 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 自动门禁与生产安全 | 2/2 | Complete   | 2026-07-19 |
-| 2. 核心运维与 OneBot 实测 | 3/3 | Complete (protocol/Compose UAT; external QQ pending) | 2026-07-19 |
-| 3. 可恢复部署与浏览器验证 | 3/3 | Complete (external OneBot pending) | 2026-07-19 |
-| 4. 可审查发布候选 | 4/4 | Verifying (external OneBot pending; gap-closure implemented) | 2026-07-19 |
+| 1. 自动门禁与生产安全 | 2/2 | Complete | 2026-07-19 |
+| 2. 核心运维与 OneBot 实测 | 3/3 | Complete (protocol UAT + official QQ private live) | 2026-07-21 |
+| 3. 可恢复部署与浏览器验证 | 3/3 | Complete | 2026-07-19 |
+| 4. 可审查发布候选 | 4/4 | Deployed (`v0.0.6-ops.1`, up.dh891.top) | 2026-07-21 |
+
+Follow-ups (not phase blockers): QQ official group notify, optional GHCR image, operator secret rotation.
 
 ---
 *Roadmap created: 2026-07-18*
+*Last updated: 2026-07-21 after live deploy and decisions consolidation*

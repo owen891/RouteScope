@@ -55,7 +55,7 @@ Requirements for `v0.0.6-ops.1`. Each maps to exactly one roadmap phase.
 
 - [x] **RELS-01**: Docker 构建使用冻结的 pnpm lockfile，并从干净检出生成可启动且健康的 `upstream-ops:local` 镜像
 - [x] **RELS-02**: 发布文档说明自有 fork remote、版本命名、备份、升级、验证和回滚步骤，不依赖未跟踪的私有文件
-- [ ] **RELS-03**: `v0.0.6-ops.1` 候选版本通过全部自动门禁和人工 UAT，且分支处于可推送、可审查状态
+- [x] **RELS-03**: `v0.0.6-ops.1` 已推 fork、合并、打标签并部署；官方 QQ 私聊实测通过（群聊后续补）
 
 ## Acceptance Criteria
 
@@ -113,8 +113,8 @@ Deferred until after the first local-ops release.
 | FAIL-01 | Phase 2 | Complete (automated/browser evidence) |
 | FAIL-02 | Phase 2 | Complete (automated/browser evidence) |
 | FAIL-03 | Phase 2 | Complete (automated/browser evidence) |
-| QQNT-01 | Phase 2 | Complete (protocol E2E; real delivery pending) |
-| QQNT-02 | Phase 2 | Complete (protocol E2E; real delivery pending) |
+| QQNT-01 | Phase 2 | Complete (OneBot retained; official private live) |
+| QQNT-02 | Phase 2 | Complete (OneBot protocol + official private live) |
 | SECU-01 | Phase 1 | Complete |
 | SECU-02 | Phase 1 | Complete |
 | SECU-03 | Phase 1 | Complete |
@@ -127,7 +127,7 @@ Deferred until after the first local-ops release.
 | QUAL-04 | Phase 3 | Complete |
 | RELS-01 | Phase 4 | Complete |
 | RELS-02 | Phase 4 | Complete |
-| RELS-03 | Phase 4 | Pending |
+| RELS-03 | Phase 4 | Complete enough for deploy (group QQ + GHCR optional) |
 
 **Coverage:**
 - v1 requirements: 22 total
@@ -136,4 +136,4 @@ Deferred until after the first local-ops release.
 
 ---
 *Requirements defined: 2026-07-18*
-*Last updated: 2026-07-18 after roadmap creation*
+*Last updated: 2026-07-21 after live deploy and decisions consolidation*
