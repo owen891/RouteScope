@@ -721,7 +721,7 @@ func syncSubscriptionAlertTest(t *testing.T, path string) {
 		SubscriptionAlertCooldown:              time.Hour,
 		SendMaxAttempts:                        1,
 	})
-	monitorSvc := monitor.NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	monitorSvc := monitor.NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	r := gin.New()
 	registerChannels(r.Group("/api"), &Deps{

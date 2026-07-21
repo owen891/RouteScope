@@ -20,6 +20,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/logger"
 	"github.com/bejix/upstream-ops/backend/monitor"
 	"github.com/bejix/upstream-ops/backend/notify"
+	"github.com/bejix/upstream-ops/backend/observation"
 	"github.com/bejix/upstream-ops/backend/runtimeconfig"
 	"github.com/bejix/upstream-ops/backend/scheduler"
 	"github.com/bejix/upstream-ops/backend/storage"
@@ -105,6 +106,10 @@ func main() {
 	announcements := storage.NewUpstreamAnnouncements(db)
 	rates := storage.NewRates(db)
 	monLogs := storage.NewMonitorLogs(db)
+	obsRepo := storage.NewObservations(db)
+	healthProbes := storage.NewHealthProbes(db)
+	obsRecorder := observation.NewRecorder(obsRepo)
+	probeSvc := observation.NewProbeService(healthProbes, channels, obsRecorder)
 	syncTargets := storage.NewUpstreamSyncTargets(db)
 	syncGroups := storage.NewUpstreamSyncTargetGroups(db)
 	upstreamSyncGroups := storage.NewUpstreamSyncGroups(db)
@@ -120,7 +125,7 @@ func main() {
 		BatchRateChanges:                         cfg.Notifications.BatchRateChanges,
 		MinChangePct:                             cfg.Notifications.MinChangePct,
 		BalanceLowCooldown:                       time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
-			LoginFailedCooldown:                      time.Duration(cfg.Notifications.LoginFailedCooldownMinutes) * time.Minute,
+		LoginFailedCooldown:                      time.Duration(cfg.Notifications.LoginFailedCooldownMinutes) * time.Minute,
 		SubscriptionDailyRemainingThresholdPct:   cfg.Notifications.SubscriptionDailyRemainingThresholdPct,
 		SubscriptionWeeklyRemainingThresholdPct:  cfg.Notifications.SubscriptionWeeklyRemainingThresholdPct,
 		SubscriptionMonthlyRemainingThresholdPct: cfg.Notifications.SubscriptionMonthlyRemainingThresholdPct,
@@ -129,7 +134,7 @@ func main() {
 		SendMaxAttempts:                          cfg.Notifications.SendMaxAttempts,
 	})
 	dispatcher.UpdateProxyConfig(cfg.Proxy)
-	monitorSvc := monitor.NewService(channels, announcements, rates, monLogs, channelSvc, dispatcher, log)
+	monitorSvc := monitor.NewService(channels, announcements, rates, monLogs, channelSvc, dispatcher, obsRecorder, log)
 	syncSvc := syncer.New(channels, rates, cipher, channelSvc, log, syncTargets, syncGroups, upstreamSyncGroups, upstreamSyncAccounts, managedSyncAccounts, syncLogs)
 	syncSvc.SetDispatcher(dispatcher)
 
@@ -184,6 +189,9 @@ func main() {
 		Announcements: announcements,
 		Rates:         rates,
 		MonLogs:       monLogs,
+		Observations:  obsRepo,
+		HealthProbes:  healthProbes,
+		ProbeSvc:      probeSvc,
 		ChannelSvc:    channelSvc,
 		Monitor:       monitorSvc,
 		Dispatcher:    dispatcher,

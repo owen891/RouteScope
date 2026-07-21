@@ -41,10 +41,10 @@ Each requirement maps to exactly one phase below.
 
 ### Observation Facts
 
-- [ ] **OBS-01**: 系统把服务端定时采集结果沉淀为统一 observation 记录（至少 balance / rate / health / announcement）
-- [ ] **OBS-02**: 每条 observation 带 channel_id、source、sampled_at、payload 摘要与原始引用，可按渠道/时间查询
-- [ ] **OBS-03**: 手动刷新与定时扫描共用同一 normalizer，避免“页面上看到的”和“库里沉淀的”两套口径
-- [ ] **OBS-04**: 支持手动健康探测配置与探测运行记录（成功/失败/延迟/错误分类）
+- [x] **OBS-01**: 系统把服务端定时采集结果沉淀为统一 observation 记录（至少 balance / rate / health / announcement）
+- [x] **OBS-02**: 每条 observation 带 channel_id、source、sampled_at、payload 摘要与原始引用，可按渠道/时间查询
+- [x] **OBS-03**: 手动刷新与定时扫描共用同一 normalizer，避免“页面上看到的”和“库里沉淀的”两套口径
+- [x] **OBS-04**: 支持手动健康探测配置与探测运行记录（成功/失败/延迟/错误分类）
 
 ### Comparisons
 
@@ -145,10 +145,10 @@ Each requirement maps to exactly one phase below.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OBS-01 | 5 | Planned |
-| OBS-02 | 5 | Planned |
-| OBS-03 | 5 | Planned |
-| OBS-04 | 5 | Planned |
+| OBS-01 | 5 | Implemented (backend) |
+| OBS-02 | 5 | Implemented (backend) |
+| OBS-03 | 5 | Implemented (backend) |
+| OBS-04 | 5 | Implemented (backend) |
 | CMP-01 | 6 | Planned |
 | CMP-02 | 6 | Planned |
 | CMP-03 | 6 | Planned |
@@ -167,6 +167,16 @@ Each requirement maps to exactly one phase below.
 | UX-03 | 8 | Planned |
 
 **Coverage:** 20 requirements, all mapped.
+
+## Backend status (2026-07-21)
+
+Phase 5 backend foundation landed:
+- tables: `observations`, `health_probe_configs`, `health_probe_runs`
+- monitor writes balance/cost/rate/announcement observations on refresh
+- APIs: `GET /api/observations`, health-probe CRUD + `POST /api/health-probes/configs/:id/run`
+- UI decision pages still pending (Phase 5 completion needs minimal UI or documented API-only acceptance)
+
+
 
 ---
 *Created: 2026-07-21*

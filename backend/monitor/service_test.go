@@ -130,7 +130,7 @@ func TestRefreshRatesSyncAnnouncementsAndNotify(t *testing.T) {
 	dispatcher := notify.NewDispatcher(notifies, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)), notify.Policy{
 		SendMaxAttempts: 1,
 	})
-	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if err := svc.RefreshRates(context.Background(), ch); err != nil {
 		t.Fatalf("first refresh: %v", err)
@@ -218,7 +218,7 @@ func TestRefreshRatesSkipsAnnouncementsWhenIgnored(t *testing.T) {
 
 	channelSvc := channel.NewService(channels, authSessions, captchas, rates, monitorLogs, cipher)
 	dispatcher := notify.NewDispatcher(notifies, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)), notify.Policy{SendMaxAttempts: 1})
-	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if err := svc.RefreshRates(context.Background(), ch); err != nil {
 		t.Fatalf("refresh: %v", err)
@@ -320,7 +320,7 @@ func TestRefreshRatesEmitsRateAddedAndRemoved(t *testing.T) {
 		BatchRateChanges: true,
 		SendMaxAttempts:  1,
 	})
-	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if err := svc.RefreshRates(context.Background(), ch); err != nil {
 		t.Fatalf("first refresh: %v", err)
@@ -479,7 +479,7 @@ func TestRefreshRatesAfterChannelReuseDoesNotEmitOldStructureChange(t *testing.T
 		BatchRateChanges: true,
 		SendMaxAttempts:  1,
 	})
-	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if err := svc.RefreshRates(context.Background(), ch); err != nil {
 		t.Fatalf("refresh: %v", err)
@@ -584,7 +584,7 @@ func TestRateEventSubscriptionFiltersGroups(t *testing.T) {
 		BatchRateChanges: true,
 		SendMaxAttempts:  1,
 	})
-	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	if err := svc.RefreshRates(context.Background(), ch); err != nil {
 		t.Fatalf("first refresh: %v", err)
@@ -699,7 +699,7 @@ func TestSubscriptionUsageAlertsAndCooldown(t *testing.T) {
 		SubscriptionAlertCooldown:                time.Hour,
 		SendMaxAttempts:                          1,
 	})
-	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	svc.ScanAllBalances(context.Background())
 	if got := webhookHits.Load(); got != 3 {

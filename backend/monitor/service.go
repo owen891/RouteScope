@@ -11,6 +11,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/channel"
 	"github.com/bejix/upstream-ops/backend/connector"
 	"github.com/bejix/upstream-ops/backend/notify"
+	"github.com/bejix/upstream-ops/backend/observation"
 	"github.com/bejix/upstream-ops/backend/progress"
 	"github.com/bejix/upstream-ops/backend/storage"
 )
@@ -23,6 +24,7 @@ type Service struct {
 	monitorLogs   *storage.MonitorLogs
 	channelSvc    *channel.Service
 	dispatcher    *notify.Dispatcher
+	observations  *observation.Recorder
 	log           *slog.Logger
 }
 
@@ -33,6 +35,7 @@ func NewService(
 	monitorLogs *storage.MonitorLogs,
 	channelSvc *channel.Service,
 	dispatcher *notify.Dispatcher,
+	observations *observation.Recorder,
 	log *slog.Logger,
 ) *Service {
 	return &Service{
@@ -42,6 +45,7 @@ func NewService(
 		monitorLogs:   monitorLogs,
 		channelSvc:    channelSvc,
 		dispatcher:    dispatcher,
+		observations:  observations,
 		log:           log,
 	}
 }
@@ -118,6 +122,9 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 		Balance:   res.Balance,
 		SampledAt: sampledAt,
 	})
+	if s.observations != nil {
+		s.observations.RecordBalance(c.ID, storage.ObservationSourceManual, res.Balance, sampledAt)
+	}
 	progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f", res.Balance),
 		map[string]any{"balance": res.Balance})
 
@@ -137,6 +144,9 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 		TodayCost: costRes.TodayCost,
 		SampledAt: sampledAt,
 	})
+	if s.observations != nil {
+		s.observations.RecordCost(c.ID, storage.ObservationSourceManual, costRes.TodayCost, costRes.TotalCost, sampledAt)
+	}
 	progress.OK(ctx, progress.StageCost, fmt.Sprintf("今日 %0.4f / 累计 %0.4f", costRes.TodayCost, costRes.TotalCost),
 		map[string]any{"today_cost": costRes.TodayCost, "total_cost": costRes.TotalCost})
 
@@ -265,6 +275,9 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	}
 	if err := s.syncAnnouncements(ctx, c, resolved, conn, session); err != nil {
 		s.log.Warn("sync announcements failed", "channel", c.Name, "err", err)
+	}
+	if s.observations != nil {
+		s.observations.RecordRates(c.ID, storage.ObservationSourceManual, len(results), now)
 	}
 	progress.OK(ctx, progress.StageRates, fmt.Sprintf("拉到 %d 个分组", len(results)),
 		map[string]any{"count": len(results)})
@@ -462,6 +475,9 @@ func (s *Service) syncAnnouncements(ctx context.Context, c *storage.Channel, res
 	}
 	for i := range newRecords {
 		rec := newRecords[i]
+		if s.observations != nil {
+			s.observations.RecordAnnouncement(c.ID, storage.ObservationSourceManual, rec.Title, time.Now())
+		}
 		_ = s.dispatcher.Dispatch(ctx, notify.Message{
 			Event:     storage.EventAnnouncement,
 			ChannelID: c.ID,

@@ -14,6 +14,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/connector"
 	"github.com/bejix/upstream-ops/backend/crypto"
 	"github.com/bejix/upstream-ops/backend/notify"
+	"github.com/bejix/upstream-ops/backend/observation"
 	"github.com/bejix/upstream-ops/backend/runtimeconfig"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/bejix/upstream-ops/backend/syncer"
@@ -59,6 +60,9 @@ type Deps struct {
 	Announcements *storage.UpstreamAnnouncements
 	Rates         *storage.Rates
 	MonLogs       *storage.MonitorLogs
+	Observations  *storage.Observations
+	HealthProbes  *storage.HealthProbes
+	ProbeSvc      *observation.ProbeService
 	ChannelSvc    channelService
 	Monitor       monitorService
 	Dispatcher    *notify.Dispatcher
@@ -97,6 +101,8 @@ func Register(r *gin.Engine, d *Deps) {
 		registerAnnouncements(api, d)
 		registerRates(api, d)
 		registerMonitorLogs(api, d)
+		registerObservations(api, d)
+		registerHealthProbes(api, d)
 		registerDashboard(api, d)
 		registerSettings(api, d)
 		registerUpstreamSync(api, d)
