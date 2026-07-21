@@ -25,15 +25,15 @@ See: `.planning/PROJECT.md`
 **Decisions source of truth:** `.planning/DECISIONS.md`
 
 **Core value:** 运维者能够安全、快速地发现上游渠道故障，批量修复或同步，并在变更前后可靠地验证与恢复数据。  
-**Current focus:** Follow-ups after v0.0.6-ops.1 deploy (group QQ notify, optional GHCR image, secret rotation)
+**Current focus:** Decision Layer next milestone formalized (OBS/CMP/RTE/ADJ); v0.0.6-ops.1 hotfixes remain optional
 
 ## Current Position
 
-Phase: 04 (可审查发布候选) — **DEPLOYED**  
-Status: Live on `https://up.dh891.top` with auth, 14 channels, and verified QQ official private notification  
-Last activity: 2026-07-21 — direction locked to upstream-ops; ratio-watch archived
+Phase: 04 complete / **Next = Phase 5 Observation Foundation (planned, not started)**  
+Status: Live on `https://up.dh891.top`; decision-layer requirements documented for v0.1.0  
+Last activity: 2026-07-21 — formalized UR observations/comparisons/route/adjustment into next-milestone requirements
 
-Progress: [██████████] 100% of planned phases executed; residual follow-ups listed below
+Progress: v0.0.6-ops.1 deployed; next milestone requirements ready
 
 ## Live deployment
 
@@ -75,16 +75,17 @@ High-signal:
 1. Official QQ **group** notification
 2. Optional GHCR image publish for `v0.0.6-ops.1`
 3. Operator secret rotation (admin password / AppSecret / root)
+4. Begin Phase 5 (Observation Foundation) planning/execution when product work resumes
 
 ### Deferred Items
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| v2 | OPRL-01 through OPRL-04; MAIN-01 through MAIN-03 | Deferred | Project initialization |
-| old UR | observations / comparisons / route / adjustment platform | Deferred | 2026-07-21 direction pivot |
+| v0.1 decision layer | OBS/CMP/RTE/ADJ/UX formal requirements | Planned next | 2026-07-21 |
+| v2 ops reliability | OPRL-01 … OPRL-04; MAIN-01 … MAIN-03 | Deferred | Project initialization |
 
 ## Session Continuity
 
 Last session: 2026-07-21  
-Stopped at: Decisions consolidated; live deploy + private QQ notify working  
-Resume file: `.planning/DECISIONS.md`
+Stopped at: Decision-layer requirements formalized for next milestone  
+Resume file: `.planning/REQUIREMENTS-v0.1-decision-layer.md`

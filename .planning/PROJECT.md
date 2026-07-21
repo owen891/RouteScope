@@ -22,12 +22,9 @@ UpstreamOps Local Ops Edition 是基于官方 `bejix/upstream-ops` v0.0.6 的自
 
 ### Active
 
-- [x] all-api-hub v2 备份可以预览并按新增、重命名、跳过或更新策略安全导入
-- [x] 渠道失败可以分类、筛选、失败优先展示，并支持批量改密、清理登录信息或仅同步失败渠道
-- [x] QQ 官方机器人私聊通知可用；OneBot 兼容保留；群聊 openid 待补
-- [x] 生产部署默认经过鉴权、备份、恢复和匿名 API 检查，不会在未知状态下暴露管理接口
-- [x] 本地与 CI 使用同一套 lint、单测、构建和 Compose 门禁
-- [x] 已构建并部署 `v0.0.6-ops.1` 候选（fork 已合并打标签）；GHCR 正式镜像可选后续
+- [x] v0.0.6-ops.1 local-ops edition deployed on up.dh891.top
+- [ ] **Next milestone v0.1.0 Decision Layer** — observations / comparisons / route advice / adjustment audit  
+  Formal requirements: `.planning/REQUIREMENTS-v0.1-decision-layer.md`
 
 ### Out of Scope
 
@@ -43,6 +40,7 @@ UpstreamOps Local Ops Edition 是基于官方 `bejix/upstream-ops` v0.0.6 的自
 - **线上：** `https://up.dh891.top`，数据 14 渠道，鉴权开启。
 - **Fork：** `owen891/upstream-ops`；标签 `v0.0.6-ops.1`；PR #1 已合并到 fork main。
 - **QQ：** 生产路径为官方开放平台 `qqofficial`；NapCat 个人扫码路径已放弃。
+- **下一阶段需求：** `.planning/REQUIREMENTS-v0.1-decision-layer.md`（观测/对比/路由/调价审计）
 - 决策总表：`.planning/DECISIONS.md`。
 
 ## Constraints
@@ -86,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 after upstream-ops pivot + live deploy*
+*Last updated: 2026-07-21 after formalizing decision-layer next milestone*
