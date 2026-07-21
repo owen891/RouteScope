@@ -75,7 +75,7 @@ High-signal:
 1. Official QQ **group** notification
 2. Optional GHCR image publish for `v0.0.6-ops.1`
 3. Operator secret rotation (admin password / AppSecret / root)
-4. Begin Phase 5 (Observation Foundation) planning/execution when product work resumes
+4. Phase 5 foundation in progress: observations + health probes storage/API wired into monitor
 
 ### Deferred Items
 

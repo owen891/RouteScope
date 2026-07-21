@@ -294,6 +294,75 @@ type MonitorLog struct {
 
 func (MonitorLog) TableName() string { return "monitor_logs" }
 
+// ObservationKind 统一观测事实类型（Decision Layer Phase 5）。
+type ObservationKind string
+
+const (
+	ObservationBalance      ObservationKind = "balance"
+	ObservationRate         ObservationKind = "rate"
+	ObservationHealth       ObservationKind = "health"
+	ObservationAnnouncement ObservationKind = "announcement"
+	ObservationCost         ObservationKind = "cost"
+)
+
+// ObservationSource 观测来源。
+type ObservationSource string
+
+const (
+	ObservationSourceSchedule ObservationSource = "schedule"
+	ObservationSourceManual   ObservationSource = "manual"
+	ObservationSourceProbe    ObservationSource = "probe"
+)
+
+// Observation 统一观测事实。payload 为 JSON 摘要，不含凭据。
+type Observation struct {
+	ID           uint              `gorm:"primaryKey" json:"id"`
+	ChannelID    uint              `gorm:"not null;index:idx_obs_channel_kind_time,priority:1;index" json:"channel_id"`
+	Kind         ObservationKind   `gorm:"size:32;not null;index:idx_obs_channel_kind_time,priority:2;index" json:"kind"`
+	Source       ObservationSource `gorm:"size:32;not null;default:'schedule'" json:"source"`
+	Success      bool              `gorm:"not null" json:"success"`
+	Summary      string            `gorm:"size:512" json:"summary,omitempty"`
+	PayloadJSON  string            `gorm:"type:text" json:"payload_json,omitempty"`
+	ErrorClass   string            `gorm:"size:64;index" json:"error_class,omitempty"`
+	ErrorMessage string            `gorm:"type:text" json:"error_message,omitempty"`
+	SampledAt    time.Time         `gorm:"not null;index:idx_obs_channel_kind_time,priority:3;index" json:"sampled_at"`
+	CreatedAt    time.Time         `json:"created_at"`
+}
+
+func (Observation) TableName() string { return "observations" }
+
+// HealthProbeConfig 手动/定时健康探测目标。
+// ChannelID 可选：绑定渠道时默认探测 SiteURL；也可填自定义 URL。
+type HealthProbeConfig struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:128;not null;uniqueIndex" json:"name"`
+	ChannelID *uint     `gorm:"index" json:"channel_id,omitempty"`
+	URL       string    `gorm:"size:512" json:"url,omitempty"`
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	TimeoutMS int       `gorm:"not null;default:5000" json:"timeout_ms"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (HealthProbeConfig) TableName() string { return "health_probe_configs" }
+
+// HealthProbeRun 一次健康探测运行记录。
+type HealthProbeRun struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	ConfigID     uint      `gorm:"not null;index" json:"config_id"`
+	ChannelID    *uint     `gorm:"index" json:"channel_id,omitempty"`
+	URL          string    `gorm:"size:512;not null" json:"url"`
+	Success      bool      `gorm:"not null" json:"success"`
+	StatusCode   int       `json:"status_code,omitempty"`
+	LatencyMS    int64     `json:"latency_ms"`
+	ErrorClass   string    `gorm:"size:64;index" json:"error_class,omitempty"`
+	ErrorMessage string    `gorm:"type:text" json:"error_message,omitempty"`
+	StartedAt    time.Time `gorm:"not null;index" json:"started_at"`
+	FinishedAt   time.Time `json:"finished_at"`
+}
+
+func (HealthProbeRun) TableName() string { return "health_probe_runs" }
+
 // UpstreamSyncTarget 目标 Sub2API 站点配置。
 //
 // 管理员 API Key 单独加密保存，检测结果只作为状态缓存，不影响已保存的同步分组。
