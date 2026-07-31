@@ -138,6 +138,57 @@ func (a *AdminClient) FindGroupByName(ctx context.Context, t AdminTarget, name s
 	return nil, nil
 }
 
+func (a *AdminClient) GetGroup(ctx context.Context, t AdminTarget, id int64) (*AdminGroup, error) {
+	body, err := a.getJSON(ctx, t, "/api/v1/admin/groups/"+strconv.FormatInt(id, 10))
+	if err != nil {
+		return nil, err
+	}
+	var group AdminGroup
+	if err := json.Unmarshal(body, &group); err != nil {
+		return nil, fmt.Errorf("decode admin group: %w", err)
+	}
+	if group.Ratio == 0 && group.RateMultiplier != 0 {
+		group.Ratio = group.RateMultiplier
+	}
+	return &group, nil
+}
+
+// UpdateGroupRatio changes only the billing multiplier. Sending a narrow PATCH-like
+// PUT body is supported by Sub2API's pointer-based UpdateGroupRequest contract.
+func (a *AdminClient) UpdateGroupRatio(ctx context.Context, t AdminTarget, id int64, ratio float64) (*AdminGroup, bool, error) {
+	body, err := json.Marshal(map[string]float64{"rate_multiplier": ratio})
+	if err != nil {
+		return nil, false, err
+	}
+	resp, err := a.client.http.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		SetHeader("x-api-key", t.APIKey).
+		SetBody(body).
+		Put(strings.TrimRight(t.BaseURL, "/") + "/api/v1/admin/groups/" + strconv.FormatInt(id, 10))
+	if err != nil {
+		return nil, true, err
+	}
+	if resp.IsError() {
+		return nil, false, fmt.Errorf("update admin group ratio: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
+	}
+	var wrapped struct {
+		Code    int        `json:"code"`
+		Message string     `json:"message"`
+		Data    AdminGroup `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body(), &wrapped); err != nil {
+		return nil, true, fmt.Errorf("decode updated admin group: %w", err)
+	}
+	if wrapped.Code != 0 {
+		return nil, false, errors.New(strings.TrimSpace(wrapped.Message))
+	}
+	if wrapped.Data.Ratio == 0 && wrapped.Data.RateMultiplier != 0 {
+		wrapped.Data.Ratio = wrapped.Data.RateMultiplier
+	}
+	return &wrapped.Data, false, nil
+}
+
 func (a *AdminClient) FindAccountByName(ctx context.Context, t AdminTarget, name string) (*AdminAccount, error) {
 	items, err := a.ListAccounts(ctx, t, 1, 100)
 	if err != nil {

@@ -12,15 +12,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bejix/upstream-ops/backend/adjustment"
 	"github.com/bejix/upstream-ops/backend/api"
 	"github.com/bejix/upstream-ops/backend/auth"
 	"github.com/bejix/upstream-ops/backend/channel"
+	"github.com/bejix/upstream-ops/backend/comparison"
 	"github.com/bejix/upstream-ops/backend/config"
+	"github.com/bejix/upstream-ops/backend/contextview"
 	"github.com/bejix/upstream-ops/backend/crypto"
+	feishucontrol "github.com/bejix/upstream-ops/backend/feishu"
+	"github.com/bejix/upstream-ops/backend/gateway"
 	"github.com/bejix/upstream-ops/backend/logger"
 	"github.com/bejix/upstream-ops/backend/monitor"
 	"github.com/bejix/upstream-ops/backend/notify"
 	"github.com/bejix/upstream-ops/backend/observation"
+	"github.com/bejix/upstream-ops/backend/routeadvice"
 	"github.com/bejix/upstream-ops/backend/runtimeconfig"
 	"github.com/bejix/upstream-ops/backend/scheduler"
 	"github.com/bejix/upstream-ops/backend/storage"
@@ -45,7 +51,11 @@ func main() {
 	resolvedConfigPath := config.ResolvePath(*configPath, usedConfigPath)
 
 	log := logger.New(cfg.Log.Level, cfg.Log.Format)
-	log.Info("starting UpstreamOps", "port", cfg.Server.Port, "mode", cfg.Server.Mode)
+	log.Info("starting RouteScope", "port", cfg.Server.Port, "mode", cfg.Server.Mode)
+	if config.RequiresAdminAuth(cfg.Server.Mode) && !cfg.Auth.Enabled {
+		log.Error("authentication must be enabled in release or production mode", "mode", cfg.Server.Mode)
+		os.Exit(1)
+	}
 
 	if _, err := os.Stat(resolvedConfigPath); errors.Is(err, os.ErrNotExist) {
 		fileCfg, err := config.LoadFile(resolvedConfigPath)
@@ -74,11 +84,12 @@ func main() {
 		if tokenSecret == "" {
 			tokenSecret = cfg.Security.AppSecret
 		}
-		authSvc, err = auth.New(
+		authSvc, err = auth.NewWithTokenVersion(
 			cfg.Auth.Username,
 			cfg.Auth.Password,
 			tokenSecret,
 			time.Duration(cfg.Auth.SessionTTLHours)*time.Hour,
+			cfg.Auth.TokenVersion,
 		)
 		if err != nil {
 			log.Error("init auth failed (set ADMIN_USERNAME / ADMIN_PASSWORD or AUTH_ENABLED=false)", "err", err)
@@ -108,18 +119,36 @@ func main() {
 	monLogs := storage.NewMonitorLogs(db)
 	obsRepo := storage.NewObservations(db)
 	healthProbes := storage.NewHealthProbes(db)
+	feishuStore := storage.NewFeishuStore(db)
 	obsRecorder := observation.NewRecorder(obsRepo)
 	probeSvc := observation.NewProbeService(healthProbes, channels, obsRecorder)
+	cmpSvc := comparison.NewService(channels, rates)
+	routeAdviceStore := storage.NewRouteAdviceStore(db)
+	routeAdviceSvc := routeadvice.NewService(channels, rates, obsRepo, routeAdviceStore)
+	adjustmentAudits := storage.NewAdjustmentAudits(db)
 	syncTargets := storage.NewUpstreamSyncTargets(db)
 	syncGroups := storage.NewUpstreamSyncTargetGroups(db)
 	upstreamSyncGroups := storage.NewUpstreamSyncGroups(db)
 	upstreamSyncAccounts := storage.NewUpstreamSyncAccounts(db)
 	managedSyncAccounts := storage.NewUpstreamSyncManagedAccounts(db)
 	syncLogs := storage.NewUpstreamSyncLogs(db)
+	gatewayGroups := storage.NewGatewayGroups(db)
+	gatewayKeys := storage.NewGatewayKeys(db)
+	gatewayRoutes := storage.NewGatewayRoutes(db)
+	gatewayProviders := storage.NewGatewayProviders(db)
+	gatewayUsage := storage.NewGatewayUsageLogs(db)
+	modelPrices := storage.NewModelPriceOverrides(db)
+	usageSnapshots := storage.NewUpstreamUsageSnapshots(db)
+	contextView := contextview.NewService(db)
 
 	channelSvc := channel.NewService(channels, authSessions, captchas, rates, monLogs, cipher)
 	channelSvc.UpdateProxyConfig(cfg.Proxy)
 	channelSvc.UpdateUpstreamConfig(cfg.Upstream)
+	gatewaySvc := gateway.NewService(gatewayGroups, gatewayKeys, gatewayRoutes, gatewayUsage, modelPrices, channels, channelSvc, cipher, log)
+	gatewaySvc.SetProviders(gatewayProviders)
+	gatewaySvc.UpdateProxyConfig(cfg.Proxy)
+	gatewaySvc.UpdateUpstreamConfig(cfg.Upstream)
+	gatewaySvc.UpdateGatewayConfig(cfg.Gateway)
 	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
 		NotificationPrefix:                       cfg.App.NotificationPrefix,
 		BatchRateChanges:                         cfg.Notifications.BatchRateChanges,
@@ -134,12 +163,40 @@ func main() {
 		SendMaxAttempts:                          cfg.Notifications.SendMaxAttempts,
 	})
 	dispatcher.UpdateProxyConfig(cfg.Proxy)
+	adjustmentSvc := adjustment.NewService(syncTargets, syncGroups, adjustmentAudits, cipher, dispatcher)
+
+	var feishuMessenger feishucontrol.Messenger
+	if cfg.Feishu.Enabled && cfg.Feishu.AppID != "" && cfg.Feishu.AppSecret != "" {
+		feishuMessenger, err = feishucontrol.NewLarkMessenger(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
+		if err != nil {
+			log.Warn("init Feishu messenger failed", "err", err)
+		}
+	}
+	feishuSvc, err := feishucontrol.NewService(cfg.Feishu, feishuStore, cfg.Security.AppSecret, feishuMessenger, log)
+	if err != nil {
+		log.Error("init Feishu control service failed", "err", err)
+		os.Exit(1)
+	}
+	var feishuCallback http.Handler
+	if feishuSvc.Ready() {
+		callback, callbackErr := feishucontrol.NewCallback(feishuSvc)
+		if callbackErr != nil {
+			log.Warn("init Feishu callback failed", "err", callbackErr)
+		} else {
+			feishuCallback = callback
+			log.Info("Feishu callback ready", "path", cfg.Feishu.CallbackPath, "encrypted", cfg.Feishu.EncryptKey != "")
+		}
+	} else if cfg.Feishu.Enabled {
+		log.Warn("Feishu control channel enabled but incomplete; callback will return 503")
+	}
+
 	monitorSvc := monitor.NewService(channels, announcements, rates, monLogs, channelSvc, dispatcher, obsRecorder, log)
+	monitorSvc.SetUsageSnapshots(usageSnapshots)
 	syncSvc := syncer.New(channels, rates, cipher, channelSvc, log, syncTargets, syncGroups, upstreamSyncGroups, upstreamSyncAccounts, managedSyncAccounts, syncLogs)
 	syncSvc.SetDispatcher(dispatcher)
 
 	schedulerFactory := func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
-		return scheduler.New(scfg, monitorSvc, monLogs, syncLogs, rates, notifies, announcements, captchas, cipher, syncSvc, pcfg, log)
+		return scheduler.New(scfg, monitorSvc, monLogs, syncLogs, rates, notifies, announcements, captchas, cipher, syncSvc, gatewaySvc, pcfg, log)
 	}
 	sch := schedulerFactory(cfg.Scheduler, cfg.Proxy)
 	if err := sch.Start(); err != nil {
@@ -154,10 +211,12 @@ func main() {
 		log,
 		dispatcher,
 		channelSvc,
+		gatewaySvc,
 		authSvc,
 		sch,
 		cfg.Proxy,
 		cfg.Upstream,
+		cfg.Gateway,
 		schedulerFactory,
 	)
 
@@ -179,25 +238,43 @@ func main() {
 	}
 
 	api.Register(router, &api.Deps{
-		DB:            db,
-		Cipher:        cipher,
-		Runtime:       runtimeMgr,
-		Channels:      channels,
-		Sessions:      authSessions,
-		Captchas:      captchas,
-		Notifies:      notifies,
-		Announcements: announcements,
-		Rates:         rates,
-		MonLogs:       monLogs,
-		Observations:  obsRepo,
-		HealthProbes:  healthProbes,
-		ProbeSvc:      probeSvc,
-		ChannelSvc:    channelSvc,
-		Monitor:       monitorSvc,
-		Dispatcher:    dispatcher,
-		UpstreamSync:  syncSvc,
-		Log:           log,
-		Frontend:      frontendFS,
+		DB:                 db,
+		Cipher:             cipher,
+		Runtime:            runtimeMgr,
+		Channels:           channels,
+		Sessions:           authSessions,
+		Captchas:           captchas,
+		Notifies:           notifies,
+		Announcements:      announcements,
+		Rates:              rates,
+		MonLogs:            monLogs,
+		Observations:       obsRepo,
+		HealthProbes:       healthProbes,
+		ProbeSvc:           probeSvc,
+		Comparisons:        cmpSvc,
+		RouteAdvice:        routeAdviceSvc,
+		Adjustments:        adjustmentSvc,
+		Feishu:             feishuSvc,
+		FeishuCallback:     feishuCallback,
+		FeishuCallbackPath: cfg.Feishu.CallbackPath,
+		Gateway:            gatewaySvc,
+		GatewayGroups:      gatewayGroups,
+		GatewayKeys:        gatewayKeys,
+		GatewayUsage:       gatewayUsage,
+		ModelPrices:        modelPrices,
+		UsageSnapshots:     usageSnapshots,
+		ContextView:        contextView,
+		ChannelSvc:         channelSvc,
+		Monitor:            monitorSvc,
+		Dispatcher:         dispatcher,
+		UpstreamSync:       syncSvc,
+		Log:                log,
+		Restart: func() {
+			// A restored SQLite file cannot be safely reused by the old GORM pool.
+			// Let Compose (restart: unless-stopped) reopen the restored state.
+			os.Exit(0)
+		},
+		Frontend: frontendFS,
 	})
 
 	srv := &http.Server{

@@ -58,7 +58,11 @@ export async function apiFetch<T = unknown>(
 
   const headers = new Headers(options.headers)
   headers.set("Accept", "application/json")
-  if (options.body && !headers.has("Content-Type")) {
+  if (
+    options.body &&
+    !headers.has("Content-Type") &&
+    !(typeof FormData !== "undefined" && options.body instanceof FormData)
+  ) {
     headers.set("Content-Type", "application/json")
   }
   const token = getToken()
@@ -99,6 +103,33 @@ export async function apiFetch<T = unknown>(
     return (body as { data: T }).data
   }
   return body as T
+}
+
+/** Download an authenticated API response without trying to JSON-decode it. */
+export async function apiDownload(path: string): Promise<Blob> {
+  const url = path.startsWith("/api") || path.startsWith("http")
+    ? path
+    : `/api${path.startsWith("/") ? path : `/${path}`}`
+  const headers = new Headers({ Accept: "*/*" })
+  const token = getToken()
+  if (token) headers.set("Authorization", `Bearer ${token}`)
+
+  const res = await fetch(url, { headers })
+  if (res.status === 401) {
+    setToken(null)
+    unauthorizedHandler?.()
+  }
+  if (!res.ok) {
+    const text = await res.text()
+    let message = text || `HTTP ${res.status}`
+    try {
+      message = (JSON.parse(text) as { error?: string }).error || message
+    } catch {
+      // Keep the plain-text response.
+    }
+    throw Object.assign(new Error(message), { status: res.status }) as ApiError
+  }
+  return res.blob()
 }
 
 export const TOKEN_STORAGE_KEY = TOKEN_KEY

@@ -10,11 +10,17 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bejix/upstream-ops/backend/adjustment"
 	"github.com/bejix/upstream-ops/backend/channel"
+	"github.com/bejix/upstream-ops/backend/comparison"
 	"github.com/bejix/upstream-ops/backend/connector"
+	"github.com/bejix/upstream-ops/backend/contextview"
 	"github.com/bejix/upstream-ops/backend/crypto"
+	"github.com/bejix/upstream-ops/backend/feishu"
+	"github.com/bejix/upstream-ops/backend/gateway"
 	"github.com/bejix/upstream-ops/backend/notify"
 	"github.com/bejix/upstream-ops/backend/observation"
+	"github.com/bejix/upstream-ops/backend/routeadvice"
 	"github.com/bejix/upstream-ops/backend/runtimeconfig"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/bejix/upstream-ops/backend/syncer"
@@ -29,8 +35,10 @@ type monitorService interface {
 }
 
 type channelService interface {
+	ValidateTokenCredential(ctx context.Context, in channel.CreateInput) (*channel.TokenValidationResult, error)
 	Create(in channel.CreateInput) (*storage.Channel, error)
 	Update(id uint, in channel.UpdateInput) (*storage.Channel, error)
+	SetFavorite(id uint, favorite bool) (*storage.Channel, error)
 	Delete(id uint) error
 	ClearLoginInfo(id uint) (*storage.Channel, error)
 	TestLogin(ctx context.Context, channelID uint) error
@@ -50,24 +58,40 @@ type channelService interface {
 
 // Deps 把所有 handler 需要的依赖打包传入。
 type Deps struct {
-	DB            *gorm.DB
-	Cipher        *crypto.Cipher
-	Runtime       *runtimeconfig.Manager
-	Channels      *storage.Channels
-	Sessions      *storage.AuthSessions
-	Captchas      *storage.Captchas
-	Notifies      *storage.Notifications
-	Announcements *storage.UpstreamAnnouncements
-	Rates         *storage.Rates
-	MonLogs       *storage.MonitorLogs
-	Observations  *storage.Observations
-	HealthProbes  *storage.HealthProbes
-	ProbeSvc      *observation.ProbeService
-	ChannelSvc    channelService
-	Monitor       monitorService
-	Dispatcher    *notify.Dispatcher
-	UpstreamSync  *syncer.Service
-	Log           *slog.Logger
+	DB                 *gorm.DB
+	Cipher             *crypto.Cipher
+	Runtime            *runtimeconfig.Manager
+	Channels           *storage.Channels
+	Sessions           *storage.AuthSessions
+	Captchas           *storage.Captchas
+	Notifies           *storage.Notifications
+	Announcements      *storage.UpstreamAnnouncements
+	Rates              *storage.Rates
+	MonLogs            *storage.MonitorLogs
+	Observations       *storage.Observations
+	HealthProbes       *storage.HealthProbes
+	ProbeSvc           *observation.ProbeService
+	Comparisons        *comparison.Service
+	RouteAdvice        *routeadvice.Service
+	Adjustments        *adjustment.Service
+	Feishu             *feishu.Service
+	FeishuCallback     http.Handler
+	FeishuCallbackPath string
+	Gateway            *gateway.Service
+	GatewayGroups      *storage.GatewayGroups
+	GatewayKeys        *storage.GatewayKeys
+	GatewayUsage       *storage.GatewayUsageLogs
+	ModelPrices        *storage.ModelPriceOverrides
+	UsageSnapshots     *storage.UpstreamUsageSnapshots
+	ContextView        *contextview.Service
+	ChannelSvc         channelService
+	Monitor            monitorService
+	Dispatcher         *notify.Dispatcher
+	UpstreamSync       *syncer.Service
+	Log                *slog.Logger
+	// Restart is called after a Web restore replaces the on-disk database/config.
+	// Production wires this to the process supervisor; tests may leave it nil.
+	Restart func()
 
 	// Frontend 可选：传入嵌入的前端 dist 文件系统。nil 表示不挂载（本地开发用 vite dev server）。
 	Frontend fs.FS
@@ -75,6 +99,8 @@ type Deps struct {
 
 // Register 把所有路由挂到给定 gin engine。
 func Register(r *gin.Engine, d *Deps) {
+	registerFeishuCallback(r, d)
+
 	r.GET("/healthz", func(c *gin.Context) {
 		sqlDB, err := d.DB.DB()
 		if err != nil {
@@ -87,6 +113,15 @@ func Register(r *gin.Engine, d *Deps) {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	// 公开网关：/v1/*（不走管理端鉴权）。管理页 SPA 使用 /gateway，勿占用。
+	if d.Gateway != nil {
+		if d.Frontend != nil {
+			gateway.RegisterPublicWithoutRoot(r, d.Gateway)
+		} else {
+			gateway.RegisterPublic(r, d.Gateway)
+		}
+	}
 
 	api := r.Group("/api")
 	if d.Runtime != nil {
@@ -103,9 +138,16 @@ func Register(r *gin.Engine, d *Deps) {
 		registerMonitorLogs(api, d)
 		registerObservations(api, d)
 		registerHealthProbes(api, d)
+		registerComparisons(api, d)
+		registerRouteAdvice(api, d)
+		registerAdjustments(api, d)
+		registerFeishu(api, d)
 		registerDashboard(api, d)
+		registerContextView(api, d)
 		registerSettings(api, d)
+		registerBackups(api, d)
 		registerUpstreamSync(api, d)
+		registerGatewayAdmin(api, d)
 	}
 
 	if d.Frontend != nil {
@@ -127,8 +169,10 @@ func registerFrontend(r *gin.Engine, dist fs.FS) {
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// 永远不让 SPA fallback 覆盖 API / 健康检查路径。
-		if strings.HasPrefix(path, "/api/") || path == "/healthz" {
+		// 永远不让 SPA fallback 覆盖 API / 回调 / 健康检查 / 公开转发路径。
+		// /gateway 是前端管理页，必须允许 SPA fallback。
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/callbacks/") ||
+			path == "/healthz" || strings.HasPrefix(path, "/v1/") || path == "/v1" {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}

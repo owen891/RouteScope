@@ -38,6 +38,8 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.turbo/
+frontend/test-results/
+frontend/playwright-report/
 
 # Embedded frontend dist — 仓库里只保留 .gitkeep 占位，
 # 真实 dist 在 docker build 阶段由 frontend-builder 填充。
@@ -55,6 +57,20 @@ postgres-data/
 # Claude / AI tooling
 .claude/
 CLAUDE.md
+
+# Local AI context and planning artifacts
+.codex/
+.planning/
+AGENTS.md
+/backups/
+docs/images/
+docs/*PLAN*.md
+docs/*SPEC*.md
+docs/*AUDIT*.md
+docs/DECISIONS.md
+docs/FORK_NOTES.md
+frontend/public/logo-concepts.html
+frontend/tmp-*.png
 
 # Demo overlay —— 本地演示沙箱，永远不进 git
 Dockerfile.demo

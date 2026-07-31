@@ -6,6 +6,7 @@ import {
   normalizeSiteUrl,
   parseAllApiHubBackup,
   parseNotesPassword,
+  shouldValidateImportedToken,
   uniqueChannelName,
 } from "./all-api-hub-import"
 import { classifyChannelError } from "./channel-error"
@@ -191,6 +192,24 @@ describe("parseAllApiHubBackup", () => {
     expect(parsed.rows[0].payload).toBeUndefined()
   })
 
+  it("rejects expired tokens by default", () => {
+    const parsed = parseAllApiHubBackup({
+      accounts: [
+        {
+          site_name: "Expired",
+          site_url: "expired.example",
+          site_type: "sub2api",
+          account_info: {
+            username: "old-user",
+            access_token: "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.sig",
+          },
+        },
+      ],
+    })
+    expect(parsed.rows[0].error).toMatch(/无可用凭据/)
+    expect(parsed.rows[0].payload).toBeUndefined()
+  })
+
   it("requires a user id for NewAPI token imports", () => {
     const parsed = parseAllApiHubBackup({
       accounts: [
@@ -203,6 +222,75 @@ describe("parseAllApiHubBackup", () => {
       ],
     })
     expect(parsed.rows[0].error).toMatch(/user_id/)
+  })
+})
+
+describe("shouldValidateImportedToken", () => {
+  const expiredBackup = {
+    accounts: [
+      {
+        site_name: "Expired",
+        site_url: "expired.example",
+        site_type: "sub2api",
+        account_info: {
+          username: "old-user",
+          access_token: "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.sig",
+        },
+      },
+    ],
+  }
+
+  it("skips online validation for an explicitly allowed expired token", () => {
+    const row = parseAllApiHubBackup(expiredBackup, [], {
+      allowExpiredToken: true,
+      allowNotesPassword: false,
+    }).rows[0]
+    expect(row.warnings).toContain("expired_token")
+    expect(shouldValidateImportedToken(row, true)).toBe(false)
+  })
+
+  it("keeps online validation for a normal token", () => {
+    const row = parseAllApiHubBackup(
+      {
+        accounts: [
+          {
+            site_name: "Active",
+            site_url: "active.example",
+            site_type: "sub2api",
+            account_info: {
+              username: "user",
+              access_token: "eyJhbGciOiJub25lIn0.eyJleHAiOjk5OTk5OTk5OTl9.sig",
+            },
+          },
+        ],
+      },
+      [],
+      { allowExpiredToken: true },
+    ).rows[0]
+    expect(shouldValidateImportedToken(row, true)).toBe(true)
+  })
+
+  it("does not validate password credentials as tokens", () => {
+    const row = parseAllApiHubBackup({
+      accounts: [
+        {
+          site_name: "Password",
+          site_url: "password.example",
+          site_type: "sub2api",
+          notes: "user\nsecret",
+        },
+      ],
+    }).rows[0]
+    expect(row.payload?.credential_mode).toBe("password")
+    expect(shouldValidateImportedToken(row, true)).toBe(false)
+  })
+
+  it("still validates an expired token row unless the operator allows it", () => {
+    const row = parseAllApiHubBackup(expiredBackup, [], {
+      allowExpiredToken: true,
+      allowNotesPassword: false,
+    }).rows[0]
+    expect(shouldValidateImportedToken(row, false)).toBe(true)
   })
 })
 

@@ -506,7 +506,7 @@ export function ChannelRechargeDialog({
         </div>
 
         {info?.help_text ? (
-          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap">
+          <div className="surface-panel-muted whitespace-pre-wrap px-3 py-2 text-xs text-muted-foreground">
             {info.help_text}
           </div>
         ) : null}
@@ -538,14 +538,14 @@ export function ChannelRechargeDialog({
   function renderSubscriptionUsage() {
     if (usageLoading) {
       return (
-        <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+        <div className="surface-panel-muted px-3 py-3 text-sm text-muted-foreground">
           加载订阅用量中…
         </div>
       )
     }
     if (subscriptionUsageError) {
       return (
-        <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+        <div className="surface-panel-muted px-3 py-3 text-sm text-muted-foreground">
           {subscriptionUsageError}
         </div>
       )
@@ -553,7 +553,7 @@ export function ChannelRechargeDialog({
     const items = subscriptionUsage?.items ?? []
     if (!items.length) {
       return (
-        <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+        <div className="surface-panel-muted px-3 py-3 text-sm text-muted-foreground">
           暂无生效中的订阅。
         </div>
       )
@@ -565,7 +565,7 @@ export function ChannelRechargeDialog({
           {items.map((item) => {
             const windows = usageWindowItems(item)
             return (
-              <div key={item.id} className="rounded-lg border border-border bg-muted/20 px-3 py-3">
+              <div key={item.id} className="surface-panel-muted px-3 py-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
@@ -754,7 +754,7 @@ export function ChannelRechargeDialog({
 
         {launch?.mode === "qrcode" ? (
           <div className="space-y-3">
-            <div className="rounded-lg border border-border bg-muted/20 p-4">
+            <div className="surface-panel-muted p-4">
               <div className="flex justify-center">
                 <canvas ref={qrCanvasRef} className="rounded bg-white p-2" />
               </div>
@@ -778,7 +778,7 @@ export function ChannelRechargeDialog({
           </div>
         ) : launch?.mode === "success" ? (
           <div className="space-y-3">
-            <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-sm">
+            <div className="surface-panel-muted px-3 py-3 text-sm">
               订阅购买已完成。
             </div>
             <DialogFooter>

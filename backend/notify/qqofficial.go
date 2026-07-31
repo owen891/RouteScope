@@ -34,13 +34,13 @@ func init() {
 //   - Active push is subject to QQ platform rate limits and group-owner settings.
 //     See https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/send.html
 type qqOfficialConfig struct {
-	AppID         string `json:"app_id"`
-	AppSecret     string `json:"app_secret"`
-	MessageType   string `json:"message_type,omitempty"` // group | private
-	GroupOpenID   string `json:"group_openid,omitempty"`
-	UserOpenID    string `json:"user_openid,omitempty"`
-	OpenAPIBase   string `json:"openapi_base_url,omitempty"`
-	TokenURL      string `json:"token_url,omitempty"`
+	AppID       string `json:"app_id"`
+	AppSecret   string `json:"app_secret"`
+	MessageType string `json:"message_type,omitempty"` // group | private
+	GroupOpenID string `json:"group_openid,omitempty"`
+	UserOpenID  string `json:"user_openid,omitempty"`
+	OpenAPIBase string `json:"openapi_base_url,omitempty"`
+	TokenURL    string `json:"token_url,omitempty"`
 }
 
 type qqOfficial struct {
@@ -85,14 +85,32 @@ func newQQOfficial(raw string) (*qqOfficial, error) {
 		if cfg.GroupOpenID == "" {
 			return nil, errors.New("qqofficial group_openid is required for group messages")
 		}
+		if isNumericQQIdentifier(cfg.GroupOpenID) {
+			return nil, errors.New("qqofficial group_openid must be the platform openid, not a numeric QQ group number")
+		}
 	case "private":
 		if cfg.UserOpenID == "" {
 			return nil, errors.New("qqofficial user_openid is required for private messages")
+		}
+		if isNumericQQIdentifier(cfg.UserOpenID) {
+			return nil, errors.New("qqofficial user_openid must be the platform openid, not a numeric QQ number")
 		}
 	default:
 		return nil, errors.New("qqofficial requires message_type group|private with matching openid")
 	}
 	return &qqOfficial{cfg: cfg, http: resty.New().SetTimeout(15 * time.Second)}, nil
+}
+
+func isNumericQQIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (q *qqOfficial) Type() storage.NotificationChannelType { return storage.NotifyQQOfficial }

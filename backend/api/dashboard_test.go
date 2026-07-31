@@ -464,11 +464,13 @@ func TestRateChangesPageFiltersChannel(t *testing.T) {
 		if i >= 2 {
 			channelID = 2
 		}
+		remoteGroupID := int64(100 + i)
 		if err := rates.AppendChange(&storage.RateChangeLog{
-			ChannelID: channelID,
-			ModelName: "model-" + strconv.Itoa(i),
-			NewRatio:  float64(i + 1),
-			ChangedAt: now.Add(time.Duration(i) * time.Minute),
+			ChannelID:     channelID,
+			RemoteGroupID: &remoteGroupID,
+			ModelName:     "model-" + strconv.Itoa(i),
+			NewRatio:      float64(i + 1),
+			ChangedAt:     now.Add(time.Duration(i) * time.Minute),
 		}); err != nil {
 			t.Fatalf("append rate change: %v", err)
 		}
@@ -502,6 +504,35 @@ func TestRateChangesPageFiltersChannel(t *testing.T) {
 		if item.ChannelID != 2 {
 			t.Fatalf("unexpected channel id: %#v", resp.Data.Items)
 		}
+	}
+
+	if err := rates.AppendChange(&storage.RateChangeLog{
+		ChannelID: 2,
+		ModelName: "model-3",
+		NewRatio:  9,
+		ChangedAt: now.Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("append legacy rate change: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/rate-changes?page=1&page_size=10&channel_id=2&remote_group_id=103&model_name=model-3", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode model-filtered response: %v", err)
+	}
+	if resp.Data.Total != 2 || len(resp.Data.Items) != 2 || resp.Data.Items[0].ModelName != "model-3" {
+		t.Fatalf("unexpected model-filtered response: %#v", resp.Data)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/rate-changes?remote_group_id=invalid", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid remote group id status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 

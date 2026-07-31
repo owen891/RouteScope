@@ -610,6 +610,43 @@ func TestListAPIKeyGroups(t *testing.T) {
 	}
 }
 
+func TestGetModelPrices(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/channels/available", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"name":"内部渠道 A","description":"主线路","platforms":[{"platform":"anthropic","groups":[{"id":3,"name":"pro","rate_multiplier":1.2,"peak_rate_enabled":true,"peak_rate_multiplier":1.8}],"supported_models":[{"name":"claude-test","platform":"anthropic","pricing":{"billing_mode":"token","input_price":0.000003,"output_price":0.000015,"cache_write_price":0.00000375,"cache_read_price":0.0000003,"image_input_price":null,"image_output_price":null,"per_request_price":null,"intervals":[{"min_tokens":200000,"max_tokens":null,"tier_label":"长上下文","input_price":0.000006,"output_price":0.0000225,"cache_write_price":null,"cache_read_price":null,"per_request_price":null}]}}]}]}]}`))
+	})
+	mux.HandleFunc("/api/v1/groups/rates", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"3":1.5}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New()
+	items, err := c.GetModelPrices(context.Background(), &connector.Channel{SiteURL: srv.URL}, &connector.AuthSession{AccessToken: "token"})
+	if err != nil {
+		t.Fatalf("GetModelPrices: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1: %#v", len(items), items)
+	}
+	item := items[0]
+	if item.SourceName != "内部渠道 A" || item.GroupID != 3 || item.GroupName != "pro" || item.ModelName != "claude-test" {
+		t.Fatalf("identity fields = %#v", item)
+	}
+	if item.RateMultiplier != 1.5 || !item.PeakRateEnabled || item.PeakRateMultiplier != 1.8 {
+		t.Fatalf("rate fields = %#v", item)
+	}
+	if item.InputPrice == nil || *item.InputPrice != 0.000003 || item.OutputPrice == nil || *item.OutputPrice != 0.000015 {
+		t.Fatalf("token prices = %#v", item)
+	}
+	if len(item.Intervals) != 1 || item.Intervals[0].MinTokens != 200000 || item.Intervals[0].InputPrice == nil || *item.Intervals[0].InputPrice != 0.000006 {
+		t.Fatalf("intervals = %#v", item.Intervals)
+	}
+}
+
 func TestGetAnnouncements(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/announcements", func(w http.ResponseWriter, r *http.Request) {
@@ -710,6 +747,129 @@ func TestCreateUpdateDeleteRevealAPIKey(t *testing.T) {
 	}
 }
 
+func TestBuildSub2UpdateAPIKeyPreservesUnspecifiedIPLists(t *testing.T) {
+	groupID := int64(3)
+	body, err := buildSub2UpdateAPIKey(connector.APIKeyUpdateRequest{GroupID: &groupID})
+	if err != nil {
+		t.Fatalf("build group update: %v", err)
+	}
+	if body["group_id"] != groupID {
+		t.Fatalf("group_id = %#v", body["group_id"])
+	}
+	if _, ok := body["ip_whitelist"]; ok {
+		t.Fatalf("group-only update contains ip_whitelist: %#v", body)
+	}
+	if _, ok := body["ip_blacklist"]; ok {
+		t.Fatalf("group-only update contains ip_blacklist: %#v", body)
+	}
+
+	body, err = buildSub2UpdateAPIKey(connector.APIKeyUpdateRequest{
+		IPWhitelist: []string{},
+		IPBlacklist: []string{},
+	})
+	if err != nil {
+		t.Fatalf("build explicit empty ip update: %v", err)
+	}
+	if _, ok := body["ip_whitelist"]; !ok {
+		t.Fatalf("explicit empty ip_whitelist omitted: %#v", body)
+	}
+	if _, ok := body["ip_blacklist"]; !ok {
+		t.Fatalf("explicit empty ip_blacklist omitted: %#v", body)
+	}
+}
+
 func strPtr(v string) *string {
 	return &v
+}
+
+func TestGetUsageAnalyticsMapsSnapshotAndStatsWithoutRechargeMultiplier(t *testing.T) {
+	multiplier := 0.03
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/usage/dashboard/snapshot-v2", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		q := r.URL.Query()
+		for key, want := range map[string]string{
+			"start_date": "2026-07-28", "end_date": "2026-07-29", "granularity": "day",
+			"include_trend": "true", "include_model_stats": "true", "include_group_stats": "true",
+		} {
+			if got := q.Get(key); got != want {
+				t.Fatalf("query %s = %q, want %q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"start_date":"2026-07-28","end_date":"2026-07-29","granularity":"day","models":[{"model":"gpt-5.6-sol","requests":2816,"input_tokens":24060000,"output_tokens":1610000,"cache_creation_tokens":0,"cache_read_tokens":218190000,"total_tokens":243860000,"actual_cost":8.67,"cost":289.05}],"groups":[{"group_id":3,"group_name":"Codex - 特价（0.03）","requests":2905,"total_tokens":250920000,"actual_cost":8.791,"cost":293.0328}],"trend":[{"date":"2026-07-29","requests":2905,"input_tokens":24060000,"output_tokens":1610000,"cache_creation_tokens":0,"cache_read_tokens":225250000,"total_tokens":250920000,"actual_cost":8.791,"cost":293.0328}]}}`))
+	})
+	mux.HandleFunc("/api/v1/usage/stats", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("granularity") != "" {
+			t.Fatalf("stats unexpectedly received granularity")
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"total_requests":2905,"total_input_tokens":24060000,"total_output_tokens":1610000,"total_cache_creation_tokens":0,"total_cache_read_tokens":225250000,"total_tokens":250920000,"total_actual_cost":8.791,"total_cost":293.0328,"average_duration_ms":15080}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got, err := New().GetUsageAnalytics(context.Background(), &connector.Channel{
+		SiteURL: srv.URL, RechargeMultiplier: &multiplier,
+	}, &connector.AuthSession{AccessToken: "token"}, connector.UsageAnalyticsQuery{
+		StartDate: "2026-07-28", EndDate: "2026-07-29", Granularity: "day",
+	})
+	if err != nil {
+		t.Fatalf("GetUsageAnalytics: %v", err)
+	}
+	if got.Source != "upstream_api" || got.StartDate != "2026-07-28" || got.EndDate != "2026-07-29" {
+		t.Fatalf("analytics metadata = %#v", got)
+	}
+	if len(got.Models) != 1 || got.Models[0].Model != "gpt-5.6-sol" {
+		t.Fatalf("models = %#v", got.Models)
+	}
+	if got.Models[0].ActualCost != 8.67 || got.Models[0].StandardCost != 289.05 {
+		t.Fatalf("model costs = actual %.6f standard %.6f", got.Models[0].ActualCost, got.Models[0].StandardCost)
+	}
+	if len(got.Groups) != 1 || got.Groups[0].GroupName != "Codex - 特价（0.03）" {
+		t.Fatalf("groups = %#v", got.Groups)
+	}
+	if len(got.Trend) != 1 || got.Trend[0].CacheReadTokens != 225250000 {
+		t.Fatalf("trend = %#v", got.Trend)
+	}
+	if got.Totals.Requests != 2905 || got.Totals.TotalTokens != 250920000 || got.Totals.AverageDurationMS != 15080 {
+		t.Fatalf("totals = %#v", got.Totals)
+	}
+	if got.Totals.ActualCost != 8.791 || got.Totals.StandardCost != 293.0328 {
+		t.Fatalf("total costs changed by local multiplier: %#v", got.Totals)
+	}
+}
+
+func TestGetUsageAnalyticsFallsBackToModels(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/usage/dashboard/snapshot-v2", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	mux.HandleFunc("/api/v1/usage/dashboard/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("include_trend") != "" {
+			t.Fatalf("models fallback received snapshot-only query")
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"start_date":"2026-07-01","end_date":"2026-07-29","models":[{"model":"gpt-5.5","requests":6,"input_tokens":1000,"output_tokens":2000,"cache_creation_tokens":0,"cache_read_tokens":26310,"total_tokens":29310,"actual_cost":0.0022,"cost":0.072}]}}`))
+	})
+	mux.HandleFunc("/api/v1/usage/stats", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unsupported", http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got, err := New().GetUsageAnalytics(context.Background(), &connector.Channel{SiteURL: srv.URL}, &connector.AuthSession{AccessToken: "token"}, connector.UsageAnalyticsQuery{
+		StartDate: "2026-07-01", EndDate: "2026-07-29",
+	})
+	if err != nil {
+		t.Fatalf("GetUsageAnalytics fallback: %v", err)
+	}
+	if len(got.Models) != 1 || got.Models[0].ActualCost != 0.0022 || got.Models[0].StandardCost != 0.072 {
+		t.Fatalf("models = %#v", got.Models)
+	}
+	if got.Totals.Requests != 6 || got.Totals.TotalTokens != 29310 || got.Totals.ActualCost != 0.0022 {
+		t.Fatalf("fallback totals = %#v", got.Totals)
+	}
+	if len(got.Groups) != 0 || len(got.Trend) != 0 {
+		t.Fatalf("fallback optional data = groups %#v trend %#v", got.Groups, got.Trend)
+	}
 }

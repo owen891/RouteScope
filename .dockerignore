@@ -16,6 +16,8 @@ upstream-ops.exe
 
 # 本地构建产物：Dockerfile 内部会重新 pnpm build，不要把宿主的 dist 拷进去
 frontend/dist
+frontend/test-results
+frontend/playwright-report
 
 # 嵌入占位以外的本地 dist 内容
 web/dist/*
@@ -40,6 +42,15 @@ config.yaml
 data/
 postgres-data/
 .claude/
+
+# 本地部署与离线镜像产物，不参与应用镜像构建
+napcat-chunks/
+napcat-image.tgz
+napcat-qrcode.png
+upstream-ops-image.tgz
+upstream-ops-*.tgz
+upstream-ops-*.tar
+_preview_proxy.py
 
 # 文档（构建不需要）
 docs/

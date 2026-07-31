@@ -3,6 +3,7 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -18,14 +19,15 @@ import (
 
 // Service 监控扫描服务。
 type Service struct {
-	channels      *storage.Channels
-	announcements *storage.UpstreamAnnouncements
-	rates         *storage.Rates
-	monitorLogs   *storage.MonitorLogs
-	channelSvc    *channel.Service
-	dispatcher    *notify.Dispatcher
-	observations  *observation.Recorder
-	log           *slog.Logger
+	channels       *storage.Channels
+	announcements  *storage.UpstreamAnnouncements
+	rates          *storage.Rates
+	monitorLogs    *storage.MonitorLogs
+	channelSvc     *channel.Service
+	dispatcher     *notify.Dispatcher
+	observations   *observation.Recorder
+	usageSnapshots *storage.UpstreamUsageSnapshots
+	log            *slog.Logger
 }
 
 func NewService(
@@ -47,6 +49,45 @@ func NewService(
 		dispatcher:    dispatcher,
 		observations:  observations,
 		log:           log,
+	}
+}
+
+// SetUsageSnapshots enables persistent real-usage collection during the regular monitor scan.
+func (s *Service) SetUsageSnapshots(repo *storage.UpstreamUsageSnapshots) {
+	s.usageSnapshots = repo
+}
+
+// ScanAllChannels visits one upstream at a time and collects balance, groups,
+// real usage, and subscription state before moving to the next upstream.
+func (s *Service) ScanAllChannels(ctx context.Context) {
+	list, err := s.channels.ListMonitorEnabled()
+	if err != nil {
+		s.log.Error("list channels", "err", err)
+		return
+	}
+	now := time.Now()
+	usageQuery := connector.UsageAnalyticsQuery{
+		StartDate:   now.AddDate(0, 0, -6).Format("2006-01-02"),
+		EndDate:     now.Format("2006-01-02"),
+		Granularity: "day",
+	}
+	for i := range list {
+		if ctx.Err() != nil {
+			return
+		}
+		c := list[i]
+		if err := s.RefreshBalance(ctx, &c); err != nil {
+			s.log.Warn("refresh balance failed", "channel", c.Name, "err", err)
+		}
+		if err := s.RefreshRates(ctx, &c); err != nil {
+			s.log.Warn("refresh rates failed", "channel", c.Name, "err", err)
+		}
+		if err := s.RefreshUsageSnapshot(ctx, &c, usageQuery); err != nil {
+			s.log.Warn("refresh upstream usage failed", "channel", c.Name, "err", err)
+		}
+		if err := s.CheckSubscriptionUsageAlerts(ctx, &c); err != nil {
+			s.log.Warn("check subscription usage failed", "channel", c.Name, "err", err)
+		}
 	}
 }
 
@@ -85,6 +126,33 @@ func (s *Service) ScanAllRates(ctx context.Context) {
 }
 
 // RefreshBalance 单个渠道余额刷新，可被 API 手动触发。
+// RefreshUsageSnapshot fetches the upstream real bill and persists the rolling seven-day snapshot.
+func (s *Service) RefreshUsageSnapshot(ctx context.Context, c *storage.Channel, query connector.UsageAnalyticsQuery) error {
+	if s.usageSnapshots == nil || c.Type != storage.ChannelTypeSub2API {
+		return nil
+	}
+	attemptedAt := time.Now()
+	analytics, err := s.channelSvc.GetUsageAnalytics(ctx, c.ID, query)
+	if err != nil || analytics == nil {
+		if err == nil {
+			err = fmt.Errorf("upstream returned empty usage analytics")
+		}
+		if saveErr := s.usageSnapshots.SaveFailure(c.ID, query.StartDate, query.EndDate, query.Granularity, err.Error(), attemptedAt); saveErr != nil {
+			s.log.Warn("save upstream usage failure failed", "channel", c.Name, "err", saveErr)
+		}
+		return err
+	}
+	payload, err := json.Marshal(analytics)
+	if err != nil {
+		return fmt.Errorf("encode upstream usage snapshot: %w", err)
+	}
+	if err := s.usageSnapshots.SaveSuccess(c.ID, query.StartDate, query.EndDate, query.Granularity, string(payload), attemptedAt); err != nil {
+		return fmt.Errorf("save upstream usage snapshot: %w", err)
+	}
+	return nil
+}
+
+// RefreshBalance ??????????? API ?????
 func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error {
 	resolved, conn, session, err := s.prepare(ctx, c)
 	if err != nil {
@@ -231,6 +299,7 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 		oldComp := prev.CompletionRatio
 		_ = s.rates.AppendChange(&storage.RateChangeLog{
 			ChannelID:          c.ID,
+			RemoteGroupID:      r.GroupID,
 			ModelName:          r.ModelName,
 			OldRatio:           &oldRatio,
 			NewRatio:           r.Ratio,

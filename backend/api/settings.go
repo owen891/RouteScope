@@ -3,6 +3,8 @@ package api
 import (
 	"errors"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/bejix/upstream-ops/backend/config"
@@ -16,6 +18,7 @@ type settingsConfigView struct {
 	Notifications config.NotificationsConfig `json:"notifications"`
 	Proxy         settingsProxyView          `json:"proxy"`
 	Upstream      config.UpstreamConfig      `json:"upstream"`
+	Gateway       config.GatewayConfig       `json:"gateway"`
 }
 
 type settingsConfigInput struct {
@@ -25,14 +28,16 @@ type settingsConfigInput struct {
 	Notifications config.NotificationsConfig `json:"notifications" binding:"required"`
 	Proxy         settingsProxyInput         `json:"proxy"`
 	Upstream      config.UpstreamConfig      `json:"upstream"`
+	Gateway       config.GatewayConfig       `json:"gateway"`
 }
 
 type settingsAuthView struct {
-	Enabled               bool   `json:"enabled"`
-	Username              string `json:"username"`
-	PasswordConfigured    bool   `json:"passwordConfigured"`
-	TokenSecretConfigured bool   `json:"tokenSecretConfigured"`
-	SessionTTLHours       int    `json:"sessionTTLHours"`
+	Enabled               bool     `json:"enabled"`
+	Username              string   `json:"username"`
+	PasswordConfigured    bool     `json:"passwordConfigured"`
+	TokenSecretConfigured bool     `json:"tokenSecretConfigured"`
+	EnvironmentOverrides  []string `json:"environmentOverrides"`
+	SessionTTLHours       int      `json:"sessionTTLHours"`
 }
 
 type settingsAuthInput struct {
@@ -87,6 +92,7 @@ func getSettingsConfig(c *gin.Context, d *Deps) {
 					Username:              cfg.Auth.Username,
 					PasswordConfigured:    strings.TrimSpace(cfg.Auth.Password) != "",
 					TokenSecretConfigured: strings.TrimSpace(cfg.Auth.TokenSecret) != "" || strings.TrimSpace(cfg.Security.AppSecret) != "",
+					EnvironmentOverrides:  authEnvironmentOverrides(),
 					SessionTTLHours:       cfg.Auth.SessionTTLHours,
 				},
 				Scheduler:     cfg.Scheduler,
@@ -100,7 +106,8 @@ func getSettingsConfig(c *gin.Context, d *Deps) {
 					Username:            cfg.Proxy.Username,
 					PasswordConfigured:  strings.TrimSpace(cfg.Proxy.Password) != "",
 				},
-				Upstream: cfg.Upstream,
+				Upstream: cfg.Upstream.WithDefaults(),
+				Gateway:  cfg.Gateway.WithDefaults(),
 			},
 		},
 	})
@@ -110,6 +117,10 @@ func saveSettingsConfig(c *gin.Context, d *Deps) {
 	var in settingsConfigInput
 	if err := c.ShouldBindJSON(&in); err != nil {
 		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateAuthEnvironmentOverrides(in.Auth); err != nil {
+		fail(c, http.StatusConflict, err)
 		return
 	}
 
@@ -125,8 +136,13 @@ func saveSettingsConfig(c *gin.Context, d *Deps) {
 	cfg.Auth.Enabled = in.Auth.Enabled
 	cfg.Auth.Username = in.Auth.Username
 	cfg.Auth.SessionTTLHours = in.Auth.SessionTTLHours
-	applySecretReplacement(&cfg.Auth.Password, in.Auth.PasswordReplacement)
-	applySecretReplacement(&cfg.Auth.TokenSecret, in.Auth.TokenSecretReplacement)
+	if replaceSecret(&cfg.Auth.Password, in.Auth.PasswordReplacement) {
+		cfg.Auth.TokenVersion++
+		if cfg.Auth.TokenVersion == 0 {
+			cfg.Auth.TokenVersion = 1
+		}
+	}
+	replaceSecret(&cfg.Auth.TokenSecret, in.Auth.TokenSecretReplacement)
 	cfg.Scheduler = in.Scheduler
 	cfg.Notifications = in.Notifications
 	cfg.Proxy.Enabled = in.Proxy.Enabled
@@ -135,8 +151,9 @@ func saveSettingsConfig(c *gin.Context, d *Deps) {
 	cfg.Proxy.Host = in.Proxy.Host
 	cfg.Proxy.Port = in.Proxy.Port
 	cfg.Proxy.Username = in.Proxy.Username
-	applySecretReplacement(&cfg.Proxy.Password, in.Proxy.PasswordReplacement)
+	replaceSecret(&cfg.Proxy.Password, in.Proxy.PasswordReplacement)
 	cfg.Upstream = in.Upstream.WithDefaults()
+	cfg.Gateway = in.Gateway.WithDefaults()
 	if err := validateSettingsAuthentication(cfg); err != nil {
 		fail(c, http.StatusBadRequest, err)
 		return
@@ -160,6 +177,9 @@ func validateSettingsAuthentication(fileCfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	if config.RequiresAdminAuth(effective.Server.Mode) && !effective.Auth.Enabled {
+		return errors.New("authentication must be enabled in release or production mode")
+	}
 	if !effective.Auth.Enabled {
 		return nil
 	}
@@ -172,10 +192,62 @@ func validateSettingsAuthentication(fileCfg *config.Config) error {
 	return nil
 }
 
-func applySecretReplacement(current *string, replacement *string) {
+func replaceSecret(current *string, replacement *string) bool {
 	if replacement != nil && strings.TrimSpace(*replacement) != "" {
+		if *current == *replacement {
+			return false
+		}
 		*current = *replacement
+		return true
 	}
+	return false
+}
+
+func authEnvironmentOverrides() []string {
+	fields := []struct {
+		name  string
+		field string
+	}{
+		{name: "AUTH_ENABLED", field: "enabled"},
+		{name: "ADMIN_USERNAME", field: "username"},
+		{name: "ADMIN_PASSWORD", field: "password"},
+		{name: "AUTH_TOKEN_SECRET", field: "tokenSecret"},
+	}
+	overrides := make([]string, 0, len(fields))
+	for _, item := range fields {
+		if strings.TrimSpace(os.Getenv(item.name)) != "" {
+			overrides = append(overrides, item.field)
+		}
+	}
+	return overrides
+}
+
+func validateAuthEnvironmentOverrides(in settingsAuthInput) error {
+	for _, field := range authEnvironmentOverrides() {
+		switch field {
+		case "enabled":
+			effective, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("AUTH_ENABLED")))
+			if err != nil {
+				return errors.New("AUTH_ENABLED must be a boolean when set")
+			}
+			if in.Enabled != effective {
+				return errors.New("AUTH_ENABLED controls the effective authentication state; update the deployment environment first")
+			}
+		case "username":
+			if in.Username != os.Getenv("ADMIN_USERNAME") {
+				return errors.New("ADMIN_USERNAME controls the effective administrator username; update the deployment environment first")
+			}
+		case "password":
+			if in.PasswordReplacement != nil && strings.TrimSpace(*in.PasswordReplacement) != "" {
+				return errors.New("ADMIN_PASSWORD is environment-managed; rotate it in the deployment environment")
+			}
+		case "tokenSecret":
+			if in.TokenSecretReplacement != nil && strings.TrimSpace(*in.TokenSecretReplacement) != "" {
+				return errors.New("AUTH_TOKEN_SECRET is environment-managed; rotate it in the deployment environment")
+			}
+		}
+	}
+	return nil
 }
 
 func applySettingsConfig(c *gin.Context, d *Deps) {

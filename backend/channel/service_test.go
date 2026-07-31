@@ -13,6 +13,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/config"
 	"github.com/bejix/upstream-ops/backend/connector"
 	_ "github.com/bejix/upstream-ops/backend/connector/newapi"
+	_ "github.com/bejix/upstream-ops/backend/connector/sub2api"
 	"github.com/bejix/upstream-ops/backend/crypto"
 	"github.com/bejix/upstream-ops/backend/storage"
 )
@@ -395,5 +396,91 @@ func TestTestLoginFailsWhenSessionAuthFails(t *testing.T) {
 	}
 	if saved != nil {
 		t.Fatalf("saved session = %#v, want nil", saved)
+	}
+}
+
+func TestValidateTokenCredentialChecksNewAPIWithoutPersisting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/user/self", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "good-token" || r.Header.Get("New-Api-User") != "42" {
+			http.Error(w, `{"success":false,"message":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true,"message":"","data":{"id":42}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, _ := testService(t)
+	base := CreateInput{
+		Name:           "imported",
+		Type:           storage.ChannelTypeNewAPI,
+		SiteURL:        srv.URL,
+		CredentialMode: storage.CredentialModeToken,
+	}
+	base.TokenCredential = `{"access_token":"bad-token","user_id":"42"}`
+	if _, err := svc.ValidateTokenCredential(context.Background(), base); err == nil || !strings.Contains(err.Error(), "在线校验失败") {
+		t.Fatalf("invalid token error = %v", err)
+	}
+
+	base.TokenCredential = `{"access_token":"good-token","user_id":"42"}`
+	result, err := svc.ValidateTokenCredential(context.Background(), base)
+	if err != nil {
+		t.Fatalf("validate token: %v", err)
+	}
+	if result.Refreshed || result.TokenCredential != base.TokenCredential {
+		t.Fatalf("validation result = %#v", result)
+	}
+	channels, err := svc.Channels.List()
+	if err != nil {
+		t.Fatalf("list channels: %v", err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("validation persisted %d channels", len(channels))
+	}
+}
+
+func TestValidateTokenCredentialRefreshesSub2APIWithoutPersisting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/auth/me", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer new-access" {
+			http.Error(w, `{"code":401,"message":"expired"}`, http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"id":7}}`))
+	})
+	mux.HandleFunc("/api/v1/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, _ := testService(t)
+	result, err := svc.ValidateTokenCredential(context.Background(), CreateInput{
+		Name:            "imported-sub2api",
+		Type:            storage.ChannelTypeSub2API,
+		SiteURL:         srv.URL,
+		CredentialMode:  storage.CredentialModeToken,
+		TokenCredential: `{"access_token":"old-access","refresh_token":"old-refresh"}`,
+	})
+	if err != nil {
+		t.Fatalf("validate token: %v", err)
+	}
+	if !result.Refreshed {
+		t.Fatal("refreshed = false, want true")
+	}
+	var credential Sub2APITokenCredential
+	if err := json.Unmarshal([]byte(result.TokenCredential), &credential); err != nil {
+		t.Fatalf("decode refreshed credential: %v", err)
+	}
+	if credential.AccessToken != "new-access" || credential.RefreshToken != "new-refresh" {
+		t.Fatalf("refreshed credential = %#v", credential)
+	}
+	channels, err := svc.Channels.List()
+	if err != nil {
+		t.Fatalf("list channels: %v", err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("validation persisted %d channels", len(channels))
 	}
 }

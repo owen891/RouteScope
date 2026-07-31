@@ -1,7 +1,8 @@
-"use client"
+﻿"use client"
 
 import { useMemo, useState } from "react"
-import { Activity, Play, Plus, RefreshCw } from "lucide-react"
+import { Link, useSearchParams } from "react-router-dom"
+import { Activity, Play, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,6 +26,12 @@ import {
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import type { ObservationKind } from "@/lib/api-types"
 import { dateTime, relativeTime } from "@/lib/format"
+import {
+  observationKindLabel,
+  observationResultLabel,
+  observationSourceLabel,
+  observationSummaryLabel,
+} from "@/lib/observation-display"
 
 const kindOptions: Array<{ id: "" | ObservationKind; label: string }> = [
   { id: "", label: "全部类型" },
@@ -38,8 +45,15 @@ const kindOptions: Array<{ id: "" | ObservationKind; label: string }> = [
 export default function ObservationsPage() {
   const refresh = useTriggerRefresh()
   const channels = useChannels()
-  const [channelFilter, setChannelFilter] = useState<string>("all")
-  const [kindFilter, setKindFilter] = useState<"" | ObservationKind>("")
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawChannelID = Number(searchParams.get("channel_id"))
+  const channelFilter = Number.isInteger(rawChannelID) && rawChannelID > 0
+    ? String(rawChannelID)
+    : "all"
+  const requestedKind = searchParams.get("kind") as ObservationKind | null
+  const kindFilter = kindOptions.some((item) => item.id !== "" && item.id === requestedKind)
+    ? requestedKind!
+    : ""
   const channelID = channelFilter === "all" ? undefined : Number(channelFilter)
   const observations = useObservations({
     channelID: Number.isFinite(channelID) ? channelID : undefined,
@@ -121,37 +135,31 @@ export default function ObservationsPage() {
 
   return (
     <section className="space-y-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-foreground">观测事实</h1>
-          <p className="text-xs text-muted-foreground">
-            Phase 5：查看监控扫描沉淀的 observations，并管理健康探测。
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5"
-          onClick={() => refresh()}
-        >
-          <RefreshCw className="size-3.5" />
-          刷新
-        </Button>
-      </header>
+      <div className="rounded-lg border border-sky-500/25 bg-sky-500/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
+        <span className="font-medium text-foreground">怎么用：</span>先筛选渠道，再看最近一次采集是否成功；失败记录会直接显示原因。余额、倍率和账单由同一次上游采集流程写入数据库。
+      </div>
 
-      <Card>
-        <CardHeader className="pb-3">
+      <Card className="gap-3">
+        <CardHeader className="pt-4">
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="size-4" />
-            Observations
+            最近采集记录
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>渠道</Label>
-              <Select value={channelFilter} onValueChange={setChannelFilter}>
-                <SelectTrigger>
+        <CardContent className="space-y-3 pb-4">
+          <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/15 px-3 py-2">
+            <div className="w-36 space-y-1">
+              <Label className="text-xs">渠道</Label>
+              <Select
+                value={channelFilter}
+                onValueChange={(value) => {
+                  const next = new URLSearchParams(searchParams)
+                  if (value === "all") next.delete("channel_id")
+                  else next.set("channel_id", value)
+                  setSearchParams(next, { replace: true })
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full">
                   <SelectValue placeholder="全部渠道" />
                 </SelectTrigger>
                 <SelectContent>
@@ -164,13 +172,18 @@ export default function ObservationsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>类型</Label>
+            <div className="w-36 space-y-1">
+              <Label className="text-xs">类型</Label>
               <Select
                 value={kindFilter || "all"}
-                onValueChange={(v) => setKindFilter(v === "all" ? "" : (v as ObservationKind))}
+                onValueChange={(value) => {
+                  const next = new URLSearchParams(searchParams)
+                  if (value === "all") next.delete("kind")
+                  else next.set("kind", value)
+                  setSearchParams(next, { replace: true })
+                }}
               >
-                <SelectTrigger>
+                <SelectTrigger size="sm" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -189,9 +202,21 @@ export default function ObservationsPage() {
           ) : observations.error ? (
             <p className="text-sm text-destructive">{observations.error}</p>
           ) : (observations.data ?? []).length === 0 ? (
-            <p className="rounded border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-              暂无观测记录。手动刷新渠道余额/倍率，或等待定时扫描后会出现。
-            </p>
+            <div className="rounded-xl border border-dashed border-border bg-muted/15 px-4 py-8 text-center text-sm">
+              <span className="mx-auto flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Activity className="size-4" />
+              </span>
+              <p className="mt-3 font-medium text-foreground">还没有采集记录</p>
+              <p className="mt-1 text-muted-foreground">同步渠道余额、倍率或账单后，这里会保留可追溯的采集记录。</p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <Button asChild size="sm">
+                  <Link to="/">返回总览同步渠道</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/comparisons">查看分组倍率</Link>
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="min-w-full text-left text-xs">
@@ -199,10 +224,10 @@ export default function ObservationsPage() {
                   <tr>
                     <th className="px-3 py-2 font-medium">时间</th>
                     <th className="px-3 py-2 font-medium">渠道</th>
-                    <th className="px-3 py-2 font-medium">类型</th>
-                    <th className="px-3 py-2 font-medium">来源</th>
-                    <th className="px-3 py-2 font-medium">结果</th>
-                    <th className="px-3 py-2 font-medium">摘要</th>
+                    <th className="px-3 py-2 font-medium">采集项目</th>
+                    <th className="px-3 py-2 font-medium">触发方式</th>
+                    <th className="px-3 py-2 font-medium">状态</th>
+                    <th className="px-3 py-2 font-medium">采集内容</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -214,15 +239,18 @@ export default function ObservationsPage() {
                       <td className="px-3 py-2">
                         {channelName.get(o.channel_id) ?? `#${o.channel_id}`}
                       </td>
-                      <td className="px-3 py-2">{o.kind}</td>
-                      <td className="px-3 py-2">{o.source}</td>
+                      <td className="px-3 py-2">{observationKindLabel(o.kind)}</td>
+                      <td className="px-3 py-2">{observationSourceLabel(o.source)}</td>
                       <td className="px-3 py-2">
                         <Badge variant={o.success ? "secondary" : "destructive"}>
-                          {o.success ? "ok" : o.error_class || "fail"}
+                          {observationResultLabel(o)}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2 max-w-md truncate" title={o.summary || o.error_message}>
-                        {o.summary || o.error_message || "—"}
+                      <td
+                        className="max-w-md px-3 py-2"
+                        title={observationSummaryLabel(o)}
+                      >
+                        {observationSummaryLabel(o)}
                       </td>
                     </tr>
                   ))}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,15 +16,21 @@ import (
 	"github.com/bejix/upstream-ops/backend/progress"
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp := g.Group("/channels")
 	gp.GET("", func(c *gin.Context) { listChannels(c, d) })
 	gp.POST("", func(c *gin.Context) { createChannel(c, d) })
+	gp.POST("/validate-token", func(c *gin.Context) { validateChannelToken(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllChannels(c, d) })
+	gp.GET("/model-prices", func(c *gin.Context) { listUpstreamModelPrices(c, d) })
+	gp.GET("/usage-analytics", func(c *gin.Context) { listUpstreamUsageAnalytics(c, d) })
+	gp.GET("/rates", func(c *gin.Context) { channelRatesBatch(c, d) })
 	gp.GET("/:id", func(c *gin.Context) { getChannel(c, d) })
 	gp.PUT("/:id", func(c *gin.Context) { updateChannel(c, d) })
+	gp.PUT("/:id/favorite", func(c *gin.Context) { setChannelFavorite(c, d) })
 	gp.DELETE("/:id", func(c *gin.Context) { deleteChannel(c, d) })
 	gp.POST("/:id/clear-login-info", func(c *gin.Context) { clearChannelLoginInfo(c, d) })
 	gp.POST("/:id/enable", func(c *gin.Context) { toggleChannel(c, d, true) })
@@ -94,6 +101,10 @@ type channelOutput struct {
 	UserID string `json:"user_id,omitempty"`
 }
 
+type channelFavoriteInput struct {
+	Favorite *bool `json:"favorite" binding:"required"`
+}
+
 type channelRedeemInput struct {
 	Code string `json:"code"`
 }
@@ -153,7 +164,34 @@ func createChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	created, err := d.ChannelSvc.Create(channel.CreateInput{
+	created, err := d.ChannelSvc.Create(toChannelCreateInput(in))
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": channelOutputFor(d, *created)})
+}
+
+func validateChannelToken(c *gin.Context, d *Deps) {
+	var in channelInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := d.ChannelSvc.ValidateTokenCredential(c.Request.Context(), toChannelCreateInput(in))
+	if err != nil {
+		fail(c, http.StatusUnprocessableEntity, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"valid":            true,
+		"token_credential": result.TokenCredential,
+		"refreshed":        result.Refreshed,
+	}})
+}
+
+func toChannelCreateInput(in channelInput) channel.CreateInput {
+	return channel.CreateInput{
 		Name:                   in.Name,
 		Type:                   in.Type,
 		SiteURL:                in.SiteURL,
@@ -172,12 +210,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		RechargeMultiplier:     in.RechargeMultiplier,
 		RechargeMultiplierMode: in.RechargeMultiplierMode,
 		MonitorEnabled:         in.MonitorEnabled,
-	})
-	if err != nil {
-		fail(c, http.StatusInternalServerError, err)
-		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": channelOutputFor(d, *created)})
 }
 
 func channelOutputs(d *Deps, list []storage.Channel) []channelOutput {
@@ -279,6 +312,32 @@ func updateChannel(c *gin.Context, d *Deps) {
 	c.JSON(http.StatusOK, gin.H{"data": channelOutputFor(d, *updated)})
 }
 
+func setChannelFavorite(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	var in channelFavoriteInput
+	if err := c.ShouldBindJSON(&in); err != nil || in.Favorite == nil {
+		if err == nil {
+			err = errors.New("favorite is required")
+		}
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	updated, err := d.ChannelSvc.SetFavorite(id, *in.Favorite)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, err)
+		} else {
+			fail(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": channelOutputFor(d, *updated)})
+}
+
 func deleteChannel(c *gin.Context, d *Deps) {
 	id, err := uintParam(c, "id")
 	if err != nil {
@@ -286,6 +345,15 @@ func deleteChannel(c *gin.Context, d *Deps) {
 		return
 	}
 	if err := d.ChannelSvc.Delete(id); err != nil {
+		var blocked *storage.ChannelDeleteBlockedError
+		if errors.As(err, &blocked) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":          blocked.Error(),
+				"sync_accounts":  blocked.SyncAccounts,
+				"gateway_routes": blocked.GatewayRoutes,
+			})
+			return
+		}
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -642,6 +710,39 @@ func channelRates(c *gin.Context, d *Deps) {
 		return
 	}
 	list, err := d.Rates.ListByChannel(id)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+func channelRatesBatch(c *gin.Context, d *Deps) {
+	values := strings.Split(c.Query("ids"), ",")
+	if len(values) == 0 || values[0] == "" {
+		fail(c, http.StatusBadRequest, fmt.Errorf("渠道 ID 不能为空"))
+		return
+	}
+	if len(values) > 500 {
+		fail(c, http.StatusBadRequest, fmt.Errorf("单次最多查询 500 个渠道"))
+		return
+	}
+	ids := make([]uint, 0, len(values))
+	seen := make(map[uint]struct{}, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+		if err != nil || id == 0 {
+			fail(c, http.StatusBadRequest, fmt.Errorf("渠道 ID 无效"))
+			return
+		}
+		channelID := uint(id)
+		if _, ok := seen[channelID]; ok {
+			continue
+		}
+		seen[channelID] = struct{}{}
+		ids = append(ids, channelID)
+	}
+	list, err := d.Rates.ListByChannels(ids)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return

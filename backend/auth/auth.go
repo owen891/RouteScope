@@ -21,15 +21,23 @@ import (
 
 // Service 单管理员登录服务。
 type Service struct {
-	username string
-	password string
-	secret   []byte
-	tokenTTL time.Duration
+	username     string
+	password     string
+	secret       []byte
+	tokenTTL     time.Duration
+	tokenVersion uint64
 }
 
 // New 构造 Service。secret 推荐 32 字节以上；若为空报错。
 // 调用方应在 secret 为空时回退到 APP_SECRET。
 func New(username, password, secret string, ttl time.Duration) (*Service, error) {
+	return NewWithTokenVersion(username, password, secret, ttl, 1)
+}
+
+// NewWithTokenVersion constructs an auth service whose tokens are valid only
+// for the supplied credential generation. Increment the generation when the
+// administrator password changes to revoke every previously issued token.
+func NewWithTokenVersion(username, password, secret string, ttl time.Duration, tokenVersion uint64) (*Service, error) {
 	if username == "" || password == "" {
 		return nil, errors.New("auth username / password are required")
 	}
@@ -39,11 +47,15 @@ func New(username, password, secret string, ttl time.Duration) (*Service, error)
 	if ttl <= 0 {
 		ttl = 7 * 24 * time.Hour
 	}
+	if tokenVersion == 0 {
+		tokenVersion = 1
+	}
 	return &Service{
-		username: username,
-		password: password,
-		secret:   []byte(secret),
-		tokenTTL: ttl,
+		username:     username,
+		password:     password,
+		secret:       []byte(secret),
+		tokenTTL:     ttl,
+		tokenVersion: tokenVersion,
 	}, nil
 }
 
@@ -51,6 +63,7 @@ func New(username, password, secret string, ttl time.Duration) (*Service, error)
 type claims struct {
 	Sub string `json:"sub"`
 	Exp int64  `json:"exp"`
+	Ver uint64 `json:"ver"`
 }
 
 // Login 校验账号密码，返回新的 token 与过期时间。
@@ -60,7 +73,7 @@ func (s *Service) Login(username, password string) (string, time.Time, error) {
 		return "", time.Time{}, errors.New("invalid username or password")
 	}
 	expiresAt := time.Now().Add(s.tokenTTL)
-	c := claims{Sub: s.username, Exp: expiresAt.Unix()}
+	c := claims{Sub: s.username, Exp: expiresAt.Unix(), Ver: s.tokenVersion}
 	tok, err := s.sign(c)
 	if err != nil {
 		return "", time.Time{}, err
@@ -96,6 +109,9 @@ func (s *Service) Verify(token string) (string, error) {
 	if c.Sub != s.username {
 		return "", errors.New("unknown subject")
 	}
+	if c.Ver != s.tokenVersion {
+		return "", errors.New("token has been revoked")
+	}
 	return c.Sub, nil
 }
 
@@ -119,6 +135,9 @@ func (s *Service) Username() string { return s.username }
 
 // TokenTTL 返回登录 token 的有效期。
 func (s *Service) TokenTTL() time.Duration { return s.tokenTTL }
+
+// TokenVersion returns the credential generation accepted by this service.
+func (s *Service) TokenVersion() uint64 { return s.tokenVersion }
 
 // Middleware 校验 Authorization 头。不通过返回 401。
 //

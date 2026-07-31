@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -735,4 +736,108 @@ func mustEncrypt(t *testing.T, cipher *crypto.Cipher, plain string) string {
 func jsonNumber(v int) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func TestScanAllChannelsCollectsEachUpstreamBeforeNext(t *testing.T) {
+	db := openTestDB(t)
+	channels := storage.NewChannels(db)
+	authSessions := storage.NewAuthSessions(db)
+	captchas := storage.NewCaptchas(db)
+	announcements := storage.NewUpstreamAnnouncements(db)
+	rates := storage.NewRates(db)
+	monitorLogs := storage.NewMonitorLogs(db)
+	notifies := storage.NewNotifications(db)
+	usageSnapshots := storage.NewUpstreamUsageSnapshots(db)
+	cipher, err := crypto.NewCipher("secret")
+	if err != nil {
+		t.Fatalf("cipher: %v", err)
+	}
+
+	var mu sync.Mutex
+	paths := make([]string, 0)
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+
+		suffix := r.URL.Path
+		if strings.HasPrefix(suffix, "/a") || strings.HasPrefix(suffix, "/b") {
+			suffix = suffix[2:]
+		}
+		switch suffix {
+		case "/api/v1/auth/me":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"balance":50}}`))
+		case "/api/v1/usage/dashboard/stats":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"today_actual_cost":1,"total_actual_cost":2}}`))
+		case "/api/v1/groups/available":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[{"id":1,"name":"default","description":"default","rate_multiplier":1}]}`))
+		case "/api/v1/groups/rates":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{}}`))
+		case "/api/v1/announcements":
+			_, _ = w.Write([]byte(`{"code":0,"message":"success","data":[]}`))
+		case "/api/v1/usage/dashboard/snapshot-v2":
+			_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"start_date":"2026-07-23","end_date":"2026-07-29","granularity":"day","models":[{"model":"gpt-test","requests":20,"total_tokens":1000000,"actual_cost":1,"cost":2}],"groups":[],"trend":[]}}`))
+		case "/api/v1/usage/stats":
+			_, _ = w.Write([]byte(`{"code":0,"message":"","data":{"total_requests":20,"total_tokens":1000000,"total_actual_cost":1,"total_cost":2,"average_duration_ms":800}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiSrv.Close()
+
+	for _, prefix := range []string{"a", "b"} {
+		ch := &storage.Channel{
+			Name:           prefix,
+			Type:           storage.ChannelTypeSub2API,
+			SiteURL:        apiSrv.URL + "/" + prefix,
+			Username:       "u",
+			PasswordCipher: mustEncrypt(t, cipher, `{"access_token":"token"}`),
+			CredentialMode: storage.CredentialModeToken,
+			MonitorEnabled: true,
+		}
+		if err := channels.Create(ch); err != nil {
+			t.Fatalf("create channel %s: %v", prefix, err)
+		}
+	}
+
+	channelSvc := channel.NewService(channels, authSessions, captchas, rates, monitorLogs, cipher)
+	dispatcher := notify.NewDispatcher(notifies, cipher, slog.New(slog.NewTextHandler(io.Discard, nil)), notify.Policy{SendMaxAttempts: 1})
+	svc := NewService(channels, announcements, rates, monitorLogs, channelSvc, dispatcher, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc.SetUsageSnapshots(usageSnapshots)
+	svc.ScanAllChannels(context.Background())
+
+	mu.Lock()
+	gotPaths := append([]string(nil), paths...)
+	mu.Unlock()
+	lastA, firstB := -1, -1
+	for i, path := range gotPaths {
+		if strings.HasPrefix(path, "/a/") {
+			lastA = i
+		}
+		if firstB == -1 && strings.HasPrefix(path, "/b/") {
+			firstB = i
+		}
+	}
+	if lastA == -1 || firstB == -1 || lastA >= firstB {
+		t.Fatalf("upstreams were interleaved: %#v", gotPaths)
+	}
+
+	list, err := channels.List()
+	if err != nil {
+		t.Fatalf("list channels: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("channels = %d, want 2", len(list))
+	}
+	queryStart := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
+	queryEnd := time.Now().Format("2006-01-02")
+	for _, ch := range list {
+		snapshot, err := usageSnapshots.Find(ch.ID, queryStart, queryEnd, "day")
+		if err != nil {
+			t.Fatalf("find usage snapshot for %s: %v", ch.Name, err)
+		}
+		if snapshot.FetchedAt == nil || snapshot.PayloadJSON == "" || snapshot.LastError != "" {
+			t.Fatalf("invalid usage snapshot for %s: %#v", ch.Name, snapshot)
+		}
+	}
 }

@@ -145,6 +145,11 @@ const notificationEventOptions: Array<{ id: string; label: string; events: Notif
     label: "同步分组变动",
     events: ["upstream_sync_group_changed"],
   },
+  {
+    id: "adjustment_changed",
+    label: "调价与回滚",
+    events: ["adjustment_executed", "adjustment_rolled_back"],
+  },
   { id: "announcement", label: "上游公告", events: ["announcement"] },
   { id: "login_failed", label: "登录失败", events: ["login_failed"] },
   { id: "captcha_failed", label: "验证码失败", events: ["captcha_failed"] },
@@ -287,9 +292,15 @@ function buildConfigByType(type: NotificationChannelType, cfg: ConfigState): str
       if (!cfg.qq_off_app_secret.trim()) throw new Error("AppSecret 必填")
       if (cfg.qq_off_message_type === "group") {
         if (!cfg.qq_off_group_openid.trim()) throw new Error("群 openid 必填")
+        if (/^\d+$/.test(cfg.qq_off_group_openid.trim())) {
+          throw new Error("群 openid 不能填写数字 QQ 群号，请使用平台事件下发的 group_openid")
+        }
         body.group_openid = cfg.qq_off_group_openid.trim()
       } else {
         if (!cfg.qq_off_user_openid.trim()) throw new Error("用户 openid 必填")
+        if (/^\d+$/.test(cfg.qq_off_user_openid.trim())) {
+          throw new Error("用户 openid 不能填写数字 QQ 号，请使用平台事件下发的 user_openid")
+        }
         body.user_openid = cfg.qq_off_user_openid.trim()
       }
       return JSON.stringify(body)
@@ -307,7 +318,7 @@ export function NotificationFormDialog({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refresh = useTriggerRefresh()
-  const channels = useChannels()
+  const channels = useChannels(open)
 
   useEffect(() => {
     if (open) {
@@ -803,7 +814,7 @@ function ConfigFields({ type, cfg, updateCfg, disabled, isEdit }: ConfigFieldsPr
         <p className="text-[11px] leading-4 text-muted-foreground">
           兼容 go-cqhttp / NapCat / Lagrange.OneBot 等 OneBot HTTP API。
           需要登录真实 QQ 号，可能顶掉手机会话；生产更推荐「QQ 官方机器人」。
-          默认按「UpstreamOps 在 Docker、机器人在宿主机」填写
+          默认按「本控制台在 Docker、机器人在宿主机」填写
           <code className="mx-1 text-[10px]">http://host.docker.internal:5700</code>
           。保存后点渠道列表的「测试」验证。
         </p>

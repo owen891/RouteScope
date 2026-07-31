@@ -1898,8 +1898,11 @@ func TestApplySyncGroupDisablesManagedAccountWhenSourceChannelDeleted(t *testing
 	if _, err := svc.ApplySyncGroup(context.Background(), rule.ID); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
-	if err := storage.NewChannels(db).Delete(ch.ID); err != nil {
-		t.Fatalf("delete channel: %v", err)
+	// The public delete path now rejects this while the sync account is live.
+	// Create the legacy dangling reference directly so the reconciler's repair
+	// behavior remains covered for databases created before that guard existed.
+	if err := db.Delete(&storage.Channel{}, ch.ID).Error; err != nil {
+		t.Fatalf("delete source channel fixture: %v", err)
 	}
 
 	log, err := svc.ApplySyncGroup(context.Background(), rule.ID)

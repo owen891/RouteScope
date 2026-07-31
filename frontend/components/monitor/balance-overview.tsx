@@ -1,6 +1,7 @@
 "use client"
 
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts"
+import { Link } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useBalanceTrend, useCostTrend, useDashboardSummary } from "@/lib/queries"
@@ -106,9 +107,11 @@ export function BalanceOverview() {
     : { top: 8, right: 12, left: 0, bottom: 0 }
   const dot = isMobile ? false : { r: 4, fill: "var(--background)", strokeWidth: 2 }
   const activeDot = isMobile ? { r: 4, strokeWidth: 0 } : { r: 5, strokeWidth: 0 }
+  const visibleChannels = isMobile ? channels.slice(0, 4) : channels
+  const hiddenChannelCount = Math.max(0, channels.length - visibleChannels.length)
 
   return (
-    <Card className="border border-border shadow-none lg:h-100">
+    <Card className="border border-border py-4 shadow-none lg:h-100 sm:py-6">
       <CardHeader className="flex shrink-0 flex-row items-center justify-between px-4 pb-2 sm:px-6">
         <CardTitle className="text-base font-semibold">{"余额概览"}</CardTitle>
         <span className="text-xs text-muted-foreground">{"最近 7 天"}</span>
@@ -191,7 +194,7 @@ export function BalanceOverview() {
         {/* per-channel chips */}
         {channels.length > 0 ? (
           <div className="mt-3 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-3">
-            {channels.map((c) => {
+            {visibleChannels.map((c) => {
               const isFailed = !!c.last_error
               const isUnknown = c.last_balance == null
               return (
@@ -211,6 +214,11 @@ export function BalanceOverview() {
                 </span>
               )
             })}
+            {hiddenChannelCount > 0 ? (
+              <Link to="/ops/channels" className="text-xs font-medium text-brand hover:underline">
+                其余 {hiddenChannelCount} 个
+              </Link>
+            ) : null}
           </div>
         ) : null}
       </CardContent>

@@ -34,7 +34,7 @@ func TestSaveSettingsKeepsAppVersion(t *testing.T) {
 	r := gin.New()
 	api := r.Group("/api")
 	registerSettings(api, &Deps{
-		Runtime: runtimeconfig.New(path, "", nil, nil, nil, nil, nil, config.ProxyConfig{}, config.UpstreamConfig{}, nil),
+		Runtime: runtimeconfig.New(path, "", nil, nil, nil, nil, nil, nil, config.ProxyConfig{}, config.UpstreamConfig{}, config.GatewayConfig{}, nil),
 	})
 
 	body := `{
@@ -43,7 +43,8 @@ func TestSaveSettingsKeepsAppVersion(t *testing.T) {
 		"scheduler":{"balanceCron":"37 */15 * * * *","rateCron":"13 */30 * * * *","concurrency":4,"retention":{"cron":"0 17 3 * * *","monitorLogsDays":30,"balanceSnapshotsDays":90,"notificationLogsDays":90,"announcementsDays":90}},
 		"notifications":{"batchRateChanges":true,"minChangePct":0,"balanceLowCooldownMinutes":60,"subscriptionDailyRemainingThresholdPct":0,"subscriptionWeeklyRemainingThresholdPct":0,"subscriptionMonthlyRemainingThresholdPct":0,"subscriptionExpiryThresholdHours":0,"subscriptionAlertCooldownMinutes":1440,"sendMaxAttempts":3},
 		"proxy":{"enabled":true,"versionCheckEnabled":true,"protocol":"socks5","host":"127.0.0.1","port":1080,"username":"u","passwordReplacement":"p"},
-		"upstream":{"timeoutSeconds":45,"userAgent":"custom-agent"}
+		"upstream":{"timeoutSeconds":45,"userAgent":"custom-agent"},
+		"gateway":{"tempPauseSeconds":30,"forwardTimeoutSeconds":600,"modelsCacheTTLSeconds":60,"maxFailoverSwitches":8,"routeBatchConcurrency":8,"usageErrorBodyBytes":32768,"usageErrorMsgRunes":500,"usageErrorHeaderValueRunes":8192,"usageErrorHeadersJSONBytes":65536}
 	}`
 	req := httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -68,6 +69,9 @@ func TestSaveSettingsKeepsAppVersion(t *testing.T) {
 	}
 	if got.Upstream.TimeoutSeconds != 45 || got.Upstream.UserAgent != "custom-agent" {
 		t.Fatalf("upstream = %#v", got.Upstream)
+	}
+	if got.Gateway.RouteBatchConcurrency != 8 || got.Gateway.ForwardTimeoutSeconds != 600 {
+		t.Fatalf("gateway = %#v", got.Gateway)
 	}
 }
 
@@ -200,7 +204,9 @@ func TestSaveSettingsDoesNotPersistEnvironmentSecretsAndApplyKeepsThemEffective(
 	mgr := newSettingsTestRuntime(path)
 	r := gin.New()
 	registerSettings(r.Group("/api"), &Deps{Runtime: mgr})
-	putSettings(t, r, settingsBody("", "", ""))
+	body := strings.Replace(settingsBody("", "", ""), `"enabled":false`, `"enabled":true`, 1)
+	body = strings.Replace(body, `"username":"admin"`, `"username":"env-admin"`, 1)
+	putSettings(t, r, body)
 
 	fileCfg, err := config.LoadFile(path)
 	if err != nil {
@@ -231,6 +237,66 @@ func TestSaveSettingsAcceptsExplicitSecretReplacements(t *testing.T) {
 	}
 	if got.Auth.Password != "new-admin-secret" || got.Auth.TokenSecret != "new-token-secret" || got.Proxy.Password != "new-proxy-secret" {
 		t.Fatalf("explicit replacements not persisted: auth=%#v proxy=%#v", got.Auth, got.Proxy)
+	}
+}
+
+func TestSaveSettingsPasswordRotationRevokesExistingTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, &config.Config{Auth: config.AuthConfig{
+		Enabled:         true,
+		Username:        "admin",
+		Password:        "old-password",
+		TokenSecret:     "token-secret",
+		TokenVersion:    1,
+		SessionTTLHours: 24,
+	}}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	mgr := newSettingsTestRuntime(path)
+	if _, err := mgr.ApplyFromFile(); err != nil {
+		t.Fatalf("initial apply: %v", err)
+	}
+	token, _, err := mgr.CurrentAuth().Login("admin", "old-password")
+	if err != nil {
+		t.Fatalf("initial login: %v", err)
+	}
+
+	body := settingsBody("new-password", "", "")
+	body = strings.Replace(body, `"enabled":false`, `"enabled":true`, 1)
+	putSettings(t, newSettingsRouterWithRuntime(mgr), body)
+	if _, err := mgr.ApplyFromFile(); err != nil {
+		t.Fatalf("apply rotated password: %v", err)
+	}
+	if _, err := mgr.CurrentAuth().Verify(token); err == nil {
+		t.Fatal("token issued before password rotation remained valid")
+	}
+	if _, _, err := mgr.CurrentAuth().Login("admin", "new-password"); err != nil {
+		t.Fatalf("new password rejected: %v", err)
+	}
+	fileCfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatalf("load rotated config: %v", err)
+	}
+	if fileCfg.Auth.TokenVersion != 2 {
+		t.Fatalf("token version = %d, want 2", fileCfg.Auth.TokenVersion)
+	}
+}
+
+func TestSaveSettingsRejectsAuthChangesOwnedByEnvironment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, &config.Config{}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	t.Setenv("AUTH_ENABLED", "false")
+	body := strings.Replace(settingsBody("", "", ""), `"enabled":false`, `"enabled":true`, 1)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newSettingsTestRouter(path).ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -265,6 +331,32 @@ func TestSaveSettingsRejectsInvalidEnabledAuthenticationWithoutWriting(t *testin
 	}
 }
 
+func TestValidateSettingsAuthenticationRequiresAuthInReleaseMode(t *testing.T) {
+	for _, name := range []string{
+		"APP_SECRET",
+		"AUTH_ENABLED",
+		"ADMIN_USERNAME",
+		"ADMIN_PASSWORD",
+		"AUTH_TOKEN_SECRET",
+		"SERVER_MODE",
+	} {
+		t.Setenv(name, "")
+	}
+
+	if err := validateSettingsAuthentication(&config.Config{
+		Server: config.ServerConfig{Mode: "release"},
+		Auth:   config.AuthConfig{Enabled: false},
+	}); err == nil {
+		t.Fatal("release settings accepted disabled authentication")
+	}
+	if err := validateSettingsAuthentication(&config.Config{
+		Server: config.ServerConfig{Mode: "debug"},
+		Auth:   config.AuthConfig{Enabled: false},
+	}); err != nil {
+		t.Fatalf("debug settings rejected disabled authentication: %v", err)
+	}
+}
+
 func newSettingsTestRuntime(path string) *runtimeconfig.Manager {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return runtimeconfig.New(
@@ -275,10 +367,12 @@ func newSettingsTestRuntime(path string) *runtimeconfig.Manager {
 		nil,
 		nil,
 		nil,
+		nil,
 		config.ProxyConfig{},
 		config.UpstreamConfig{},
+		config.GatewayConfig{},
 		func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
-			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
+			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
 		},
 	)
 }
@@ -286,6 +380,12 @@ func newSettingsTestRuntime(path string) *runtimeconfig.Manager {
 func newSettingsTestRouter(path string) *gin.Engine {
 	r := gin.New()
 	registerSettings(r.Group("/api"), &Deps{Runtime: newSettingsTestRuntime(path)})
+	return r
+}
+
+func newSettingsRouterWithRuntime(mgr *runtimeconfig.Manager) *gin.Engine {
+	r := gin.New()
+	registerSettings(r.Group("/api"), &Deps{Runtime: mgr})
 	return r
 }
 

@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
   Activity,
+  BadgeDollarSign,
   Bell,
+  GitCompareArrows,
   LayoutDashboard,
+  Network,
   Plus,
   Settings,
-  ShieldCheck,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -161,22 +163,34 @@ export function DockBar() {
       gradient: "from-emerald-400 via-emerald-500 to-teal-600",
     },
     {
-      icon: ShieldCheck,
-      label: "打码平台",
-      path: "/captcha",
-      gradient: "from-fuchsia-400 via-purple-500 to-purple-700",
-    },
-    {
       icon: Bell,
       label: "通知渠道",
       path: "/notifications",
       gradient: "from-amber-300 via-orange-500 to-rose-500",
     },
     {
+      icon: GitCompareArrows,
+      label: "分组倍率",
+      path: "/comparisons",
+      gradient: "from-violet-400 via-purple-500 to-indigo-600",
+    },
+    {
+      icon: BadgeDollarSign,
+      label: "真实消费",
+      path: "/usage-costs",
+      gradient: "from-emerald-400 via-teal-500 to-cyan-600",
+    },
+    {
       icon: Activity,
-      label: "观测事实",
-      path: "/observations",
+      label: "采集与健康",
+      path: "/activity?view=observations",
       gradient: "from-cyan-400 via-sky-500 to-blue-600",
+    },
+    {
+      icon: Network,
+      label: "API 转发",
+      path: "/gateway",
+      gradient: "from-violet-400 via-indigo-500 to-blue-600",
     },
     {
       icon: Settings,

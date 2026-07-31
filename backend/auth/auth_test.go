@@ -87,6 +87,31 @@ func TestVerifyRejectsInvalidTokenClasses(t *testing.T) {
 	}
 }
 
+func TestTokenVersionRevokesPreviouslyIssuedTokens(t *testing.T) {
+	before, err := NewWithTokenVersion("admin", "old-password", "test-secret", time.Hour, 1)
+	if err != nil {
+		t.Fatalf("create initial auth: %v", err)
+	}
+	token, _, err := before.Login("admin", "old-password")
+	if err != nil {
+		t.Fatalf("login before rotation: %v", err)
+	}
+	after, err := NewWithTokenVersion("admin", "new-password", "test-secret", time.Hour, 2)
+	if err != nil {
+		t.Fatalf("create rotated auth: %v", err)
+	}
+	if _, err := after.Verify(token); err == nil {
+		t.Fatal("token issued before password rotation remained valid")
+	}
+	newToken, _, err := after.Login("admin", "new-password")
+	if err != nil {
+		t.Fatalf("login after rotation: %v", err)
+	}
+	if _, err := after.Verify(newToken); err != nil {
+		t.Fatalf("verify token after rotation: %v", err)
+	}
+}
+
 func TestMiddlewareProtectsAPIAndAllowsPublicRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc, err := New("admin", "correct-password", "test-secret", time.Hour)
