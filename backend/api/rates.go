@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +25,17 @@ func registerRates(g *gin.RouterGroup, d *Deps) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
-		list, total, err := d.Rates.ListChangesPage(channelID, page, pageSize)
+		var remoteGroupID *int64
+		if value := strings.TrimSpace(c.Query("remote_group_id")); value != "" {
+			id, parseErr := strconv.ParseInt(value, 10, 64)
+			if parseErr != nil || id <= 0 {
+				fail(c, http.StatusBadRequest, errors.New("remote_group_id must be a positive integer"))
+				return
+			}
+			remoteGroupID = &id
+		}
+		modelName := strings.TrimSpace(c.Query("model_name"))
+		list, total, err := d.Rates.ListChangesPage(channelID, remoteGroupID, modelName, page, pageSize)
 		if err != nil {
 			fail(c, http.StatusInternalServerError, err)
 			return

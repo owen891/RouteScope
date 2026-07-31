@@ -1,3 +1,4 @@
+// Package config 定义应用配置结构体与默认值（含 gateway 运行时参数）。
 package config
 
 import (
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/bejix/upstream-ops/backend/storage"
 	"github.com/spf13/viper"
@@ -24,8 +26,11 @@ type Config struct {
 	Auth          AuthConfig          `mapstructure:"auth" yaml:"auth" json:"auth"`
 	Scheduler     SchedulerConfig     `mapstructure:"scheduler" yaml:"scheduler" json:"scheduler"`
 	Notifications NotificationsConfig `mapstructure:"notifications" yaml:"notifications" json:"notifications"`
+	Adjustment    AdjustmentConfig    `mapstructure:"adjustment" yaml:"adjustment" json:"adjustment"`
+	Feishu        FeishuConfig        `mapstructure:"feishu" yaml:"feishu" json:"feishu"`
 	Proxy         ProxyConfig         `mapstructure:"proxy" yaml:"proxy" json:"proxy"`
 	Upstream      UpstreamConfig      `mapstructure:"upstream" yaml:"upstream" json:"upstream"`
+	Gateway       GatewayConfig       `mapstructure:"gateway" yaml:"gateway" json:"gateway"`
 	Log           LogConfig           `mapstructure:"log" yaml:"log" json:"log"`
 }
 
@@ -39,6 +44,17 @@ type ServerConfig struct {
 	Mode           string   `mapstructure:"mode" yaml:"mode" json:"mode"`
 	TrustedProxies []string `mapstructure:"trustedProxies" yaml:"trustedProxies" json:"trustedProxies"`
 	BaseURL        string   `mapstructure:"baseURL" yaml:"baseURL" json:"baseURL"`
+}
+
+// RequiresAdminAuth reports whether the server mode must expose an authenticated
+// administrative surface. Debug and test modes remain available for local use.
+func RequiresAdminAuth(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "release", "production":
+		return true
+	default:
+		return false
+	}
 }
 
 type DatabaseConfig struct {
@@ -84,7 +100,23 @@ type AuthConfig struct {
 	Username        string `mapstructure:"username" yaml:"username" json:"username"`
 	Password        string `mapstructure:"password" yaml:"password" json:"password"`
 	TokenSecret     string `mapstructure:"tokenSecret" yaml:"tokenSecret" json:"tokenSecret"`
+	TokenVersion    uint64 `mapstructure:"tokenVersion" yaml:"tokenVersion" json:"tokenVersion"`
 	SessionTTLHours int    `mapstructure:"sessionTTLHours" yaml:"sessionTTLHours" json:"sessionTTLHours"`
+}
+
+// AdjustmentConfig stores reusable defaults for controlled remote ratio changes.
+type AdjustmentConfig struct {
+	GrossMarginPct  float64 `mapstructure:"grossMarginPct" yaml:"grossMarginPct" json:"grossMarginPct"`
+	ProfitMarginPct float64 `mapstructure:"profitMarginPct" yaml:"profitMarginPct,omitempty" json:"profitMarginPct,omitempty"`
+}
+
+// EffectiveGrossMarginPct keeps configurations written by the earlier markup-rate
+// UI readable while new writes use the unambiguous gross-margin field.
+func (c AdjustmentConfig) EffectiveGrossMarginPct() float64 {
+	if c.GrossMarginPct > 0 {
+		return c.GrossMarginPct
+	}
+	return c.ProfitMarginPct
 }
 
 type SchedulerConfig struct {
@@ -132,6 +164,73 @@ type NotificationsConfig struct {
 	SendMaxAttempts                          int     `mapstructure:"sendMaxAttempts" yaml:"sendMaxAttempts" json:"sendMaxAttempts"`
 }
 
+// FeishuConfig 飞书自建应用控制通道配置。
+//
+// Secret 只允许从环境变量或只读文件注入，yaml/json 序列化会主动忽略，
+// 避免管理后台保存配置时把凭据写回 config.yaml。
+type FeishuConfig struct {
+	Enabled               bool   `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	AppID                 string `mapstructure:"appID" yaml:"appID" json:"appID"`
+	AppSecret             string `mapstructure:"appSecret" yaml:"-" json:"-"`
+	AppSecretFile         string `mapstructure:"appSecretFile" yaml:"appSecretFile,omitempty" json:"appSecretFile,omitempty"`
+	VerificationToken     string `mapstructure:"verificationToken" yaml:"-" json:"-"`
+	VerificationTokenFile string `mapstructure:"verificationTokenFile" yaml:"verificationTokenFile,omitempty" json:"verificationTokenFile,omitempty"`
+	EncryptKey            string `mapstructure:"encryptKey" yaml:"-" json:"-"`
+	EncryptKeyFile        string `mapstructure:"encryptKeyFile" yaml:"encryptKeyFile,omitempty" json:"encryptKeyFile,omitempty"`
+	CallbackPath          string `mapstructure:"callbackPath" yaml:"callbackPath" json:"callbackPath"`
+	BindCodeTTLMinutes    int    `mapstructure:"bindCodeTTLMinutes" yaml:"bindCodeTTLMinutes" json:"bindCodeTTLMinutes"`
+	BindCodeMaxAttempts   int    `mapstructure:"bindCodeMaxAttempts" yaml:"bindCodeMaxAttempts" json:"bindCodeMaxAttempts"`
+}
+
+func (f FeishuConfig) WithDefaults() FeishuConfig {
+	if strings.TrimSpace(f.CallbackPath) == "" {
+		f.CallbackPath = "/callbacks/feishu"
+	}
+	if f.BindCodeTTLMinutes <= 0 {
+		f.BindCodeTTLMinutes = 10
+	}
+	if f.BindCodeMaxAttempts <= 0 {
+		f.BindCodeMaxAttempts = 5
+	}
+	return f
+}
+
+func (f *FeishuConfig) resolveSecrets(configPath string) error {
+	var err error
+	if f.AppSecret, err = resolveSecretValue(f.AppSecret, f.AppSecretFile, configPath, "Feishu App Secret"); err != nil {
+		return err
+	}
+	if f.VerificationToken, err = resolveSecretValue(f.VerificationToken, f.VerificationTokenFile, configPath, "Feishu Verification Token"); err != nil {
+		return err
+	}
+	if f.EncryptKey, err = resolveSecretValue(f.EncryptKey, f.EncryptKeyFile, configPath, "Feishu Encrypt Key"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func resolveSecretValue(value, secretFile, configPath, label string) (string, error) {
+	if value = strings.TrimSpace(value); value != "" {
+		return value, nil
+	}
+	secretFile = strings.TrimSpace(secretFile)
+	if secretFile == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(secretFile) && strings.TrimSpace(configPath) != "" {
+		secretFile = filepath.Join(filepath.Dir(configPath), secretFile)
+	}
+	body, err := os.ReadFile(secretFile)
+	if err != nil {
+		return "", fmt.Errorf("read %s file: %w", label, err)
+	}
+	value = strings.TrimSpace(string(body))
+	if value == "" {
+		return "", fmt.Errorf("%s file is empty", label)
+	}
+	return value, nil
+}
+
 type ProxyConfig struct {
 	Enabled             bool   `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
 	VersionCheckEnabled bool   `mapstructure:"versionCheckEnabled" yaml:"versionCheckEnabled" json:"versionCheckEnabled"`
@@ -145,6 +244,17 @@ type ProxyConfig struct {
 const (
 	DefaultUpstreamTimeoutSeconds = 30
 	DefaultUpstreamUserAgent      = "upstream-ops/0.1"
+
+	// 网关默认值（设置页可改；0/空表示使用下列默认）。
+	DefaultGatewayTempPauseSeconds           = 30
+	DefaultGatewayForwardTimeoutSeconds      = 600 // 10 分钟
+	DefaultGatewayModelsCacheTTLSeconds      = 60
+	DefaultGatewayMaxFailoverSwitches        = 8
+	DefaultGatewayRouteBatchConcurrency      = 8
+	DefaultGatewayUsageErrorBodyBytes        = 32 * 1024
+	DefaultGatewayUsageErrorMsgRunes         = 500
+	DefaultGatewayUsageErrorHeaderValueRunes = 8 * 1024
+	DefaultGatewayUsageErrorHeadersJSONBytes = 64 * 1024
 )
 
 type UpstreamConfig struct {
@@ -160,6 +270,75 @@ func (u UpstreamConfig) WithDefaults() UpstreamConfig {
 		u.UserAgent = DefaultUpstreamUserAgent
 	}
 	return u
+}
+
+// GatewayConfig 网关运行时参数（转发超时、批量运维并发、用量错误落库截断等）。
+// 可在设置页保存并「应用配置」后立即生效；字段 ≤0 时回退默认值。
+type GatewayConfig struct {
+	// TempPauseSeconds 新建组默认临时暂停时长（秒），对应路由冷却。
+	TempPauseSeconds int `mapstructure:"tempPauseSeconds" yaml:"tempPauseSeconds" json:"tempPauseSeconds"`
+	// ForwardTimeoutSeconds 单次上游转发/流式 drain 超时（秒）。
+	ForwardTimeoutSeconds int `mapstructure:"forwardTimeoutSeconds" yaml:"forwardTimeoutSeconds" json:"forwardTimeoutSeconds"`
+	// ModelsCacheTTLSeconds 公开 /v1/models 列表缓存 TTL（秒）。
+	ModelsCacheTTLSeconds int `mapstructure:"modelsCacheTTLSeconds" yaml:"modelsCacheTTLSeconds" json:"modelsCacheTTLSeconds"`
+	// MaxFailoverSwitches 新建组默认最大顺延切换次数。
+	MaxFailoverSwitches int `mapstructure:"maxFailoverSwitches" yaml:"maxFailoverSwitches" json:"maxFailoverSwitches"`
+	// RouteBatchConcurrency 批量运维并发（探测模型 / ensure 密钥 / 同步模型 / 拉源分组）。
+	RouteBatchConcurrency int `mapstructure:"routeBatchConcurrency" yaml:"routeBatchConcurrency" json:"routeBatchConcurrency"`
+	// UsageError* 用量错误明细落库截断上限（字节或 rune）。
+	UsageErrorBodyBytes        int `mapstructure:"usageErrorBodyBytes" yaml:"usageErrorBodyBytes" json:"usageErrorBodyBytes"`
+	UsageErrorMsgRunes         int `mapstructure:"usageErrorMsgRunes" yaml:"usageErrorMsgRunes" json:"usageErrorMsgRunes"`
+	UsageErrorHeaderValueRunes int `mapstructure:"usageErrorHeaderValueRunes" yaml:"usageErrorHeaderValueRunes" json:"usageErrorHeaderValueRunes"`
+	UsageErrorHeadersJSONBytes int `mapstructure:"usageErrorHeadersJSONBytes" yaml:"usageErrorHeadersJSONBytes" json:"usageErrorHeadersJSONBytes"`
+}
+
+func (g GatewayConfig) WithDefaults() GatewayConfig {
+	if g.TempPauseSeconds <= 0 {
+		g.TempPauseSeconds = DefaultGatewayTempPauseSeconds
+	}
+	if g.ForwardTimeoutSeconds <= 0 {
+		g.ForwardTimeoutSeconds = DefaultGatewayForwardTimeoutSeconds
+	}
+	if g.ModelsCacheTTLSeconds <= 0 {
+		g.ModelsCacheTTLSeconds = DefaultGatewayModelsCacheTTLSeconds
+	}
+	if g.MaxFailoverSwitches <= 0 {
+		g.MaxFailoverSwitches = DefaultGatewayMaxFailoverSwitches
+	}
+	if g.RouteBatchConcurrency <= 0 {
+		g.RouteBatchConcurrency = DefaultGatewayRouteBatchConcurrency
+	}
+	if g.RouteBatchConcurrency > 64 {
+		g.RouteBatchConcurrency = 64
+	}
+	if g.UsageErrorBodyBytes <= 0 {
+		g.UsageErrorBodyBytes = DefaultGatewayUsageErrorBodyBytes
+	}
+	if g.UsageErrorMsgRunes <= 0 {
+		g.UsageErrorMsgRunes = DefaultGatewayUsageErrorMsgRunes
+	}
+	if g.UsageErrorHeaderValueRunes <= 0 {
+		g.UsageErrorHeaderValueRunes = DefaultGatewayUsageErrorHeaderValueRunes
+	}
+	if g.UsageErrorHeadersJSONBytes <= 0 {
+		g.UsageErrorHeadersJSONBytes = DefaultGatewayUsageErrorHeadersJSONBytes
+	}
+	return g
+}
+
+func (g GatewayConfig) TempPause() time.Duration {
+	g = g.WithDefaults()
+	return time.Duration(g.TempPauseSeconds) * time.Second
+}
+
+func (g GatewayConfig) ForwardTimeout() time.Duration {
+	g = g.WithDefaults()
+	return time.Duration(g.ForwardTimeoutSeconds) * time.Second
+}
+
+func (g GatewayConfig) ModelsCacheTTL() time.Duration {
+	g = g.WithDefaults()
+	return time.Duration(g.ModelsCacheTTLSeconds) * time.Second
 }
 
 type LogConfig struct {
@@ -228,6 +407,13 @@ func load(path string, withEnv bool) (*Config, string, error) {
 		return nil, "", fmt.Errorf("unmarshal config: %w", err)
 	}
 	cfg.Upstream = cfg.Upstream.WithDefaults()
+	cfg.Gateway = cfg.Gateway.WithDefaults()
+	cfg.Feishu = cfg.Feishu.WithDefaults()
+	if withEnv {
+		if err := cfg.Feishu.resolveSecrets(v.ConfigFileUsed()); err != nil {
+			return nil, "", err
+		}
+	}
 	return cfg, v.ConfigFileUsed(), nil
 }
 
@@ -307,6 +493,10 @@ func ApplyEnvironmentOverrides(fileCfg *Config) (*Config, error) {
 		return nil, fmt.Errorf("unmarshal effective config: %w", err)
 	}
 	cfg.Upstream = cfg.Upstream.WithDefaults()
+	cfg.Feishu = cfg.Feishu.WithDefaults()
+	if err := cfg.Feishu.resolveSecrets(""); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -318,6 +508,17 @@ func bindEnvironment(v *viper.Viper) {
 	_ = v.BindEnv("auth.username", "ADMIN_USERNAME")
 	_ = v.BindEnv("auth.password", "ADMIN_PASSWORD")
 	_ = v.BindEnv("auth.tokenSecret", "AUTH_TOKEN_SECRET")
+	_ = v.BindEnv("feishu.enabled", "FEISHU_ENABLED")
+	_ = v.BindEnv("feishu.appID", "FEISHU_APP_ID")
+	_ = v.BindEnv("feishu.appSecret", "FEISHU_APP_SECRET")
+	_ = v.BindEnv("feishu.appSecretFile", "FEISHU_APP_SECRET_FILE")
+	_ = v.BindEnv("feishu.verificationToken", "FEISHU_VERIFICATION_TOKEN")
+	_ = v.BindEnv("feishu.verificationTokenFile", "FEISHU_VERIFICATION_TOKEN_FILE")
+	_ = v.BindEnv("feishu.encryptKey", "FEISHU_ENCRYPT_KEY")
+	_ = v.BindEnv("feishu.encryptKeyFile", "FEISHU_ENCRYPT_KEY_FILE")
+	_ = v.BindEnv("feishu.callbackPath", "FEISHU_CALLBACK_PATH")
+	_ = v.BindEnv("feishu.bindCodeTTLMinutes", "FEISHU_BIND_CODE_TTL_MINUTES")
+	_ = v.BindEnv("feishu.bindCodeMaxAttempts", "FEISHU_BIND_CODE_MAX_ATTEMPTS")
 	_ = v.BindEnv("database.driver", "DATABASE_DRIVER")
 	_ = v.BindEnv("database.path", "DATABASE_PATH")
 	_ = v.BindEnv("database.host", "DATABASE_HOST")
@@ -372,7 +573,7 @@ func configSearchPaths() []string {
 }
 
 func setDefaults(v *viper.Viper) {
-	v.SetDefault("app.title", "UpstreamOps")
+	v.SetDefault("app.title", "RouteScope")
 	v.SetDefault("app.notificationPrefix", "[AI 聚合监控] ")
 
 	v.SetDefault("server.port", 8418)
@@ -402,7 +603,13 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("auth.enabled", false)
 	v.SetDefault("auth.username", "admin")
+	v.SetDefault("auth.tokenVersion", 1)
 	v.SetDefault("auth.sessionTTLHours", 168) // 7 天
+
+	v.SetDefault("feishu.enabled", false)
+	v.SetDefault("feishu.callbackPath", "/callbacks/feishu")
+	v.SetDefault("feishu.bindCodeTTLMinutes", 10)
+	v.SetDefault("feishu.bindCodeMaxAttempts", 5)
 
 	// 通知去抖：默认开合并、不过滤涨跌幅、balance_low 1h 内不重复、失败重试 3 次。
 	// 即"默认行为是合并刷屏 + 不重复 balance_low + 抗短时网络抖动"，不丢任何 rate_changed 事件。
@@ -416,6 +623,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.subscriptionExpiryThresholdHours", 0)
 	v.SetDefault("notifications.subscriptionAlertCooldownMinutes", 1440)
 	v.SetDefault("notifications.sendMaxAttempts", 3)
+	v.SetDefault("adjustment.grossMarginPct", 0)
 
 	v.SetDefault("proxy.protocol", "http")
 	v.SetDefault("proxy.port", 0)
@@ -424,6 +632,16 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("upstream.timeoutSeconds", DefaultUpstreamTimeoutSeconds)
 	v.SetDefault("upstream.userAgent", DefaultUpstreamUserAgent)
+
+	v.SetDefault("gateway.tempPauseSeconds", DefaultGatewayTempPauseSeconds)
+	v.SetDefault("gateway.forwardTimeoutSeconds", DefaultGatewayForwardTimeoutSeconds)
+	v.SetDefault("gateway.modelsCacheTTLSeconds", DefaultGatewayModelsCacheTTLSeconds)
+	v.SetDefault("gateway.maxFailoverSwitches", DefaultGatewayMaxFailoverSwitches)
+	v.SetDefault("gateway.routeBatchConcurrency", DefaultGatewayRouteBatchConcurrency)
+	v.SetDefault("gateway.usageErrorBodyBytes", DefaultGatewayUsageErrorBodyBytes)
+	v.SetDefault("gateway.usageErrorMsgRunes", DefaultGatewayUsageErrorMsgRunes)
+	v.SetDefault("gateway.usageErrorHeaderValueRunes", DefaultGatewayUsageErrorHeaderValueRunes)
+	v.SetDefault("gateway.usageErrorHeadersJSONBytes", DefaultGatewayUsageErrorHeadersJSONBytes)
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "text")

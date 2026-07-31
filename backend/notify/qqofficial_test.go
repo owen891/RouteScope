@@ -101,3 +101,30 @@ func TestQQOfficialRequiresOpenID(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestQQOfficialRejectsNumericQQIdentifiers(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "group number",
+			raw:  `{"app_id":"a","app_secret":"b","message_type":"group","group_openid":"123456789"}`,
+			want: "not a numeric QQ group number",
+		},
+		{
+			name: "user number",
+			raw:  `{"app_id":"a","app_secret":"b","message_type":"private","user_openid":"987654321"}`,
+			want: "not a numeric QQ number",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := newQQOfficial(tt.raw)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

@@ -50,10 +50,12 @@ func TestApplyFromFileUpdatesUpstreamConfig(t *testing.T) {
 		channelSvc,
 		nil,
 		nil,
+		nil,
 		config.ProxyConfig{},
 		config.UpstreamConfig{},
+		config.GatewayConfig{},
 		func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
-			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
+			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
 		},
 	)
 
@@ -111,10 +113,12 @@ func TestApplyFromFileUsesEnvironmentAuthOverrides(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		config.ProxyConfig{},
 		config.UpstreamConfig{},
+		config.GatewayConfig{},
 		func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
-			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
+			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
 		},
 	)
 
@@ -162,7 +166,7 @@ func TestApplyFromFileInvalidAuthPreservesCurrentServices(t *testing.T) {
 		t.Fatalf("create old auth: %v", err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	oldScheduler := scheduler.New(config.SchedulerConfig{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, config.ProxyConfig{}, log)
+	oldScheduler := scheduler.New(config.SchedulerConfig{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, config.ProxyConfig{}, log)
 	factoryCalled := false
 	mgr := New(
 		path,
@@ -170,13 +174,15 @@ func TestApplyFromFileInvalidAuthPreservesCurrentServices(t *testing.T) {
 		log,
 		nil,
 		nil,
+		nil,
 		oldAuth,
 		oldScheduler,
 		config.ProxyConfig{},
 		config.UpstreamConfig{},
+		config.GatewayConfig{},
 		func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
 			factoryCalled = true
-			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
+			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
 		},
 	)
 
@@ -220,7 +226,7 @@ func TestApplyFromFileInvalidSchedulerPreservesCollaborators(t *testing.T) {
 		SendMaxAttempts:    1,
 	}, nil)
 	dispatcher.UpdateProxyConfig(oldProxy)
-	oldScheduler := scheduler.New(config.SchedulerConfig{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, oldProxy, log)
+	oldScheduler := scheduler.New(config.SchedulerConfig{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, oldProxy, log)
 	mgr := New(
 		path,
 		"fallback-secret",
@@ -228,11 +234,13 @@ func TestApplyFromFileInvalidSchedulerPreservesCollaborators(t *testing.T) {
 		dispatcher,
 		channelSvc,
 		nil,
+		nil,
 		oldScheduler,
 		oldProxy,
 		oldUpstream,
+		config.GatewayConfig{},
 		func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
-			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
+			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
 		},
 	)
 
@@ -261,5 +269,49 @@ func TestApplyFromFileInvalidSchedulerPreservesCollaborators(t *testing.T) {
 	}
 	if mgr.scheduler != oldScheduler {
 		t.Fatal("manager scheduler changed after failed apply")
+	}
+}
+
+func TestApplyFromFileRejectsUnauthenticatedReleaseMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, &config.Config{
+		Server: config.ServerConfig{Mode: "release"},
+		Auth:   config.AuthConfig{Enabled: false},
+		Scheduler: config.SchedulerConfig{
+			BalanceCron: "",
+			RateCron:    "",
+			Retention:   config.RetentionConfig{Cron: ""},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	t.Setenv("AUTH_ENABLED", "")
+	t.Setenv("SERVER_MODE", "")
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	factoryCalled := false
+	mgr := New(
+		path,
+		"fallback-secret",
+		log,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		config.ProxyConfig{},
+		config.UpstreamConfig{},
+		config.GatewayConfig{},
+		func(scfg config.SchedulerConfig, pcfg config.ProxyConfig) *scheduler.Scheduler {
+			factoryCalled = true
+			return scheduler.New(scfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pcfg, log)
+		},
+	)
+
+	if _, err := mgr.ApplyFromFile(); err == nil {
+		t.Fatal("ApplyFromFile succeeded with authentication disabled in release mode")
+	}
+	if factoryCalled {
+		t.Fatal("scheduler factory called before release authentication validation")
 	}
 }

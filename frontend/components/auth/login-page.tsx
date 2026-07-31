@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { useAppVersion } from "@/lib/queries"
 import type { ApiError } from "@/lib/api"
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME, PRODUCT_TAGLINE, productDocumentTitle } from "@/lib/product-brand"
+import { BrandMark } from "@/components/brand-mark"
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -16,10 +18,10 @@ export function LoginPage() {
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const appTitle = appVersion.data?.title?.trim() || "UpstreamOps"
+  const appTitle = appVersion.data?.title?.trim() || PRODUCT_NAME
 
   useEffect(() => {
-    document.title = appTitle
+    document.title = productDocumentTitle("登录", appTitle)
   }, [appTitle])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -42,10 +44,18 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-sm py-6">
         <CardHeader className="space-y-1.5">
-          <CardTitle className="text-2xl">{appTitle}</CardTitle>
-          <CardDescription>登录后台，监控渠道余额和倍率。</CardDescription>
+          <div className="flex items-center gap-3">
+            <BrandMark className="size-10" />
+            <div>
+              <CardTitle className="text-xl">{appTitle}</CardTitle>
+              <p className="text-xs text-muted-foreground">{PRODUCT_TAGLINE}</p>
+            </div>
+          </div>
+          <CardDescription>
+            {PRODUCT_DESCRIPTION}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

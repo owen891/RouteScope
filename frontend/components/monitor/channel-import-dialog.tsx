@@ -29,6 +29,7 @@ import { useChannels } from "@/lib/queries"
 import {
   normalizeSiteUrl,
   parseAllApiHubBackup,
+  shouldValidateImportedToken,
   warningLabel,
   type ImportPreviewRow,
   type NameConflictPolicy,
@@ -56,6 +57,7 @@ type RowResult = {
   ok: boolean
   action?: "create" | "update"
   error?: string
+  note?: string
   id?: number
 }
 
@@ -71,7 +73,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
   const [version, setVersion] = useState<string | undefined>()
   const [nameConflict, setNameConflict] = useState<NameConflictPolicy>("rename")
   const [allowNotesPassword, setAllowNotesPassword] = useState(true)
-  const [allowExpiredToken, setAllowExpiredToken] = useState(true)
+  const [allowExpiredToken, setAllowExpiredToken] = useState(false)
   const [syncAfter, setSyncAfter] = useState(false)
   const [syncOnlyWritten, setSyncOnlyWritten] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -193,6 +195,21 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
       const row = importable[i]
       const payload = row.payload!
       try {
+        let tokenCredential = payload.token_credential
+        const shouldValidate = shouldValidateImportedToken(row, allowExpiredToken)
+        const skippedExpiredValidation =
+          payload.credential_mode === "token" && !shouldValidate
+        if (shouldValidate) {
+          const validation = await apiFetch<{
+            valid: boolean
+            token_credential: string
+            refreshed: boolean
+          }>("/channels/validate-token", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          })
+          tokenCredential = validation.token_credential || tokenCredential
+        }
         if (row.action === "update" && row.existing_id != null) {
           const body: Record<string, unknown> = {
             name: payload.name,
@@ -215,8 +232,8 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
           if (payload.credential_mode === "password" && payload.password) {
             body.password = payload.password
           }
-          if (payload.credential_mode === "token" && payload.token_credential) {
-            body.token_credential = payload.token_credential
+          if (payload.credential_mode === "token" && tokenCredential) {
+            body.token_credential = tokenCredential
           }
           await apiFetch(`/channels/${row.existing_id}`, {
             method: "PUT",
@@ -227,18 +244,23 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
             name: payload.name,
             ok: true,
             action: "update",
+            note: skippedExpiredValidation ? "已按宽松模式写入，未在线验证" : undefined,
             id: row.existing_id,
           })
         } else {
           const created = await apiFetch<{ id: number }>(`/channels`, {
             method: "POST",
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              ...payload,
+              token_credential: tokenCredential,
+            }),
           })
           out.push({
             index: row.index,
             name: payload.name,
             ok: true,
             action: "create",
+            note: skippedExpiredValidation ? "已按宽松模式写入，未在线验证" : undefined,
             id: created?.id,
           })
         }
@@ -257,9 +279,11 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
 
     const okN = out.filter((r) => r.ok).length
     const failN = out.length - okN
+    const createdN = out.filter((r) => r.ok && r.action === "create").length
+    const updatedN = out.filter((r) => r.ok && r.action === "update").length
     if (okN > 0) {
       toast.success(
-        `完成 ${okN} 个（新建 ${createCount} / 更新 ${updateCount}）${failN ? `，失败 ${failN}` : ""}`,
+        `完成 ${okN} 个（新建 ${createdN} / 更新 ${updatedN}）${failN ? `，失败 ${failN}，详情见下方` : ""}`,
       )
     } else toast.error(`导入失败（${failN}）`)
 
@@ -383,7 +407,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
+          <div className="surface-panel-muted grid grid-cols-1 gap-3 p-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">重名策略</Label>
               <Select
@@ -418,7 +442,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
                 />
               </label>
               <label className="flex items-center justify-between gap-2 text-xs">
-                <span>允许导入已过期 Token</span>
+                <span>允许写入已过期 Token（跳过在线校验）</span>
                 <Switch
                   checked={allowExpiredToken}
                   disabled={importing}
@@ -428,6 +452,11 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
                   }}
                 />
               </label>
+              {allowExpiredToken ? (
+                <p className="rounded-md border border-warning/25 bg-warning/5 px-2 py-1.5 text-[11px] leading-4 text-warning">
+                  仅保存已过期凭据，不代表 Token 当前可用；导入后请逐个修复或重新登录。
+                </p>
+              ) : null}
               <label className="flex items-center justify-between gap-2 text-xs">
                 <span>导入后同步</span>
                 <Switch checked={syncAfter} disabled={importing} onCheckedChange={setSyncAfter} />
@@ -515,10 +544,10 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
           {results ? (
             <div className="space-y-1 rounded-md border border-border p-2 text-xs">
               <div className="font-medium">
-                导入结果 {results.filter((r) => r.ok).length}/{results.length}
+                导入结果：成功 {results.filter((r) => r.ok).length} · 失败 {results.filter((r) => !r.ok).length}
                 {importing ? ` · 进度 ${progress.done}/${progress.total}` : ""}
               </div>
-              <ScrollArea className="h-[100px]">
+              <ScrollArea className="h-[150px]">
                 <ul className="space-y-0.5">
                   {results.map((r) => (
                     <li
@@ -529,6 +558,7 @@ export function ChannelImportDialog({ open, onOpenChange, onFinished }: ChannelI
                       {r.id != null ? ` (#${r.id})` : ""}
                       {r.action ? ` (${r.action === "create" ? "new" : "update"})` : ""}
                       {r.error ? ` — ${r.error}` : ""}
+                      {r.note ? ` — ${r.note}` : ""}
                     </li>
                   ))}
                 </ul>

@@ -29,19 +29,13 @@ func TestBackupAndRestoreWorkflow(t *testing.T) {
 	dbPath := filepath.Join(dataDir, "upstream-ops.db")
 	configPath := filepath.Join(dataDir, "config.yaml")
 	originalConfig := []byte("app_secret: redacted-fixture\n")
-	createSQLiteFixture(t, dbPath)
-	originalDB, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	liveDB := createSQLiteFixture(t, dbPath)
+	t.Cleanup(func() { _ = liveDB.Close() })
 	if err := os.WriteFile(configPath, originalConfig, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dbPath+"-wal", []byte("wal-fixture"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(dbPath+"-shm", []byte("shm-fixture"), 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(dbPath + "-wal"); err != nil {
+		t.Fatalf("fixture should keep an active WAL: %v", err)
 	}
 
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,20 +52,22 @@ func TestBackupAndRestoreWorkflow(t *testing.T) {
 		"UPSTREAM_OPS_DATA_DIR="+dataDir,
 		"UPSTREAM_OPS_BACKUP_DIR="+backupDir,
 		"UPSTREAM_OPS_STOP_APP=0",
-		"BACKUP_TAG=fixture-v1",
+		"BACKUP_TAG=fixture-v2",
 		"UPSTREAM_OPS_HEALTH_URL="+health.URL+"/healthz",
 	)
-	if _, _, err := runBackupTool(t, env, "backup"); err != nil {
-		t.Fatalf("backup failed: %v", err)
+	if _, stderr, err := runBackupTool(t, env, "backup"); err != nil {
+		t.Fatalf("backup failed: %v: %s", err, stderr)
 	}
-	manifestPath := filepath.Join(backupDir, "fixture-v1", "manifest.json")
+	manifestPath := filepath.Join(backupDir, "fixture-v2", "manifest.json")
 	manifestBody, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var manifest struct {
+		Version  int    `json:"version"`
 		Mode     string `json:"mode"`
 		Database struct {
+			Driver string `json:"driver"`
 			Name   string `json:"name"`
 			Size   int64  `json:"size"`
 			SHA256 string `json:"sha256"`
@@ -83,32 +79,43 @@ func TestBackupAndRestoreWorkflow(t *testing.T) {
 	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
 		t.Fatalf("manifest is not JSON: %v", err)
 	}
-	if manifest.Mode != "sidecars" || manifest.Database.Name != "upstream-ops.db" || manifest.Database.Size != int64(len(originalDB)) || manifest.Database.SHA256 == "" || manifest.Config.Name != "config.yaml" {
+	if manifest.Version != 3 || manifest.Mode != "sqlite-online" || manifest.Database.Driver != "sqlite" || manifest.Database.Name != "upstream-ops.db" || manifest.Database.Size <= 0 || manifest.Database.SHA256 == "" || manifest.Config.Name != "config.yaml" {
 		t.Fatalf("unexpected manifest: %s", manifestBody)
 	}
-	if _, _, err := runBackupTool(t, env, "verify", "fixture-v1"); err != nil {
+	snapshotDB := filepath.Join(backupDir, "fixture-v2", "upstream-ops.db")
+	assertSQLiteChannel(t, snapshotDB, "fixture-channel")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(snapshotDB + suffix); !os.IsNotExist(err) {
+			t.Fatalf("online snapshot should not contain %s sidecar", suffix)
+		}
+	}
+	if _, _, err := runBackupTool(t, env, "verify", "fixture-v2"); err != nil {
 		t.Fatalf("verify failed: %v", err)
 	}
 
-	if err := os.WriteFile(dbPath, []byte("mutated-db"), 0o600); err != nil {
+	if err := liveDB.Close(); err != nil {
 		t.Fatal(err)
 	}
+	mutateSQLiteChannel(t, dbPath, "mutated-channel")
 	if err := os.WriteFile(configPath, []byte("mutated: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(dbPath+"-wal", []byte("stale-wal"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runBackupTool(t, env, "restore", "fixture-v1"); err != nil {
-		t.Fatalf("restore failed: %v", err)
+	if err := os.WriteFile(dbPath+"-shm", []byte("stale-shm"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	assertFileBytes(t, dbPath, originalDB)
+	if _, stderr, err := runBackupTool(t, env, "restore", "fixture-v2"); err != nil {
+		t.Fatalf("restore failed: %v: %s", err, stderr)
+	}
+	assertSQLiteChannel(t, dbPath, "fixture-channel")
 	assertFileBytes(t, configPath, originalConfig)
-	assertFileBytes(t, dbPath+"-wal", []byte("wal-fixture"))
-	if _, err := os.Stat(dbPath + "-shm"); err != nil {
-		t.Fatalf("snapshot SHM should be restored: %v", err)
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if body, err := os.ReadFile(dbPath + suffix); err == nil && bytes.HasPrefix(body, []byte("stale-")) {
+			t.Fatalf("restore kept stale SQLite sidecar %s", suffix)
+		}
 	}
-	assertFileBytes(t, dbPath+"-shm", []byte("shm-fixture"))
 }
 
 func TestBackupRejectsTamperedSnapshotWithoutChangingLiveFiles(t *testing.T) {
@@ -120,7 +127,8 @@ func TestBackupRejectsTamperedSnapshotWithoutChangingLiveFiles(t *testing.T) {
 	}
 	dbPath := filepath.Join(dataDir, "upstream-ops.db")
 	configPath := filepath.Join(dataDir, "config.yaml")
-	if err := os.WriteFile(dbPath, []byte("live-db"), 0o600); err != nil {
+	db := createSQLiteFixture(t, dbPath)
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(configPath, []byte("live-config"), 0o600); err != nil {
@@ -131,41 +139,170 @@ func TestBackupRejectsTamperedSnapshotWithoutChangingLiveFiles(t *testing.T) {
 		"UPSTREAM_OPS_DATA_DIR="+dataDir,
 		"UPSTREAM_OPS_BACKUP_DIR="+backupDir,
 		"UPSTREAM_OPS_STOP_APP=0",
-		"BACKUP_TAG=fixture-v1",
+		"BACKUP_TAG=fixture-v2",
 		"UPSTREAM_OPS_HEALTH_URL=http://127.0.0.1:1/healthz",
 	)
-	if _, _, err := runBackupTool(t, env, "backup"); err != nil {
-		t.Fatalf("backup failed: %v", err)
+	if _, stderr, err := runBackupTool(t, env, "backup"); err != nil {
+		t.Fatalf("backup failed: %v: %s", err, stderr)
 	}
-	if err := os.WriteFile(filepath.Join(backupDir, "fixture-v1", "upstream-ops.db"), []byte("tampered"), 0o600); err != nil {
+	snapshotDB := filepath.Join(backupDir, "fixture-v2", "upstream-ops.db")
+	f, err := os.OpenFile(snapshotDB, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("tampered")); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	beforeDB, _ := os.ReadFile(dbPath)
 	beforeConfig, _ := os.ReadFile(configPath)
-	if _, stderr, err := runBackupTool(t, env, "restore", "fixture-v1"); err == nil {
+	if _, stderr, err := runBackupTool(t, env, "restore", "fixture-v2"); err == nil {
 		t.Fatal("tampered restore unexpectedly succeeded")
 	} else if !strings.Contains(string(stderr), "checksum mismatch") {
 		t.Fatalf("tampered restore error = %q", stderr)
 	}
 	assertFileBytes(t, dbPath, beforeDB)
 	assertFileBytes(t, configPath, beforeConfig)
-	if _, _, err := runBackupTool(t, env, "restore", "../fixture-v1"); err == nil {
+	if _, _, err := runBackupTool(t, env, "restore", "../fixture-v2"); err == nil {
 		t.Fatal("unsafe restore unexpectedly succeeded")
 	}
 }
 
-func createSQLiteFixture(t *testing.T, path string) {
+func TestBackupRejectsMismatchedAppSecretWithoutChangingLiveFiles(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	backupDir := filepath.Join(root, "backups")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dataDir, "upstream-ops.db")
+	configPath := filepath.Join(dataDir, "config.yaml")
+	db := createSQLiteFixture(t, dbPath)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("fixture: original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseEnv := []string{
+		"UPSTREAM_OPS_ROOT=" + root,
+		"UPSTREAM_OPS_DATA_DIR=" + dataDir,
+		"UPSTREAM_OPS_BACKUP_DIR=" + backupDir,
+		"UPSTREAM_OPS_STOP_APP=0",
+		"BACKUP_TAG=fixture-secret",
+		"APP_SECRET=backup-secret",
+	}
+	if _, stderr, err := runBackupTool(t, append(os.Environ(), baseEnv...), "backup"); err != nil {
+		t.Fatalf("backup failed: %v: %s", err, stderr)
+	}
+	beforeDB, _ := os.ReadFile(dbPath)
+	beforeConfig, _ := os.ReadFile(configPath)
+	wrongEnv := append(os.Environ(), baseEnv[:len(baseEnv)-1]...)
+	wrongEnv = append(wrongEnv, "APP_SECRET=wrong-secret")
+	if _, stderr, err := runBackupTool(t, wrongEnv, "restore", "fixture-secret"); err == nil {
+		t.Fatal("restore with mismatched APP_SECRET unexpectedly succeeded")
+	} else if !strings.Contains(string(stderr), "does not match the snapshot encryption key") {
+		t.Fatalf("mismatched APP_SECRET error = %q", stderr)
+	}
+	assertFileBytes(t, dbPath, beforeDB)
+	assertFileBytes(t, configPath, beforeConfig)
+}
+
+func TestBackupRejectsMismatchedDatabaseDriverBeforeRestore(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	backupDir := filepath.Join(root, "backups")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dataDir, "upstream-ops.db")
+	configPath := filepath.Join(dataDir, "config.yaml")
+	db := createSQLiteFixture(t, dbPath)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("fixture: original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(os.Environ(),
+		"UPSTREAM_OPS_ROOT="+root,
+		"UPSTREAM_OPS_DATA_DIR="+dataDir,
+		"UPSTREAM_OPS_BACKUP_DIR="+backupDir,
+		"UPSTREAM_OPS_STOP_APP=0",
+		"BACKUP_TAG=fixture-driver",
+	)
+	if _, stderr, err := runBackupTool(t, env, "backup"); err != nil {
+		t.Fatalf("backup failed: %v: %s", err, stderr)
+	}
+	manifestPath := filepath.Join(backupDir, "fixture-driver", "manifest.json")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest = bytes.Replace(manifest, []byte(`"driver":"sqlite"`), []byte(`"driver":"mysql"`), 1)
+	manifest = bytes.Replace(manifest, []byte(`"name":"upstream-ops.db"`), []byte(`"name":"upstream-ops.sql"`), 1)
+	if err := os.WriteFile(manifestPath, manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(backupDir, "fixture-driver", "upstream-ops.db"), filepath.Join(backupDir, "fixture-driver", "upstream-ops.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, err := runBackupTool(t, env, "restore", "fixture-driver"); err == nil {
+		t.Fatal("restore with mismatched database driver unexpectedly succeeded")
+	} else if !strings.Contains(string(stderr), "does not match current deployment") {
+		t.Fatalf("mismatched driver error = %q", stderr)
+	}
+}
+
+func createSQLiteFixture(t *testing.T, path string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open SQLite fixture: %v", err)
 	}
-	defer db.Close()
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		t.Fatalf("enable WAL: %v", err)
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA wal_autocheckpoint=0",
+		"CREATE TABLE channels (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+		"INSERT INTO channels(name) VALUES ('fixture-channel')",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatalf("seed SQLite fixture with %q: %v", statement, err)
+		}
 	}
-	if _, err := db.Exec("CREATE TABLE channels (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO channels(name) VALUES ('fixture-channel')"); err != nil {
-		t.Fatalf("seed SQLite fixture: %v", err)
+	return db
+}
+
+func mutateSQLiteChannel(t *testing.T, path, name string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("UPDATE channels SET name = ?", name); err != nil {
+		t.Fatalf("mutate SQLite fixture: %v", err)
+	}
+}
+
+func assertSQLiteChannel(t *testing.T, path, want string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var got string
+	if err := db.QueryRow("SELECT name FROM channels ORDER BY id LIMIT 1").Scan(&got); err != nil {
+		t.Fatalf("query SQLite fixture: %v", err)
+	}
+	if got != want {
+		t.Fatalf("channel name = %q, want %q", got, want)
 	}
 }
 

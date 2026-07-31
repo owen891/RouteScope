@@ -5,23 +5,33 @@ import { apiFetch } from "@/lib/api"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
   AppVersion,
+  AdjustmentAudit,
+  AdjustmentConfig,
+  AdjustmentGroup,
+  AdjustmentTarget,
   BalanceTrendPoint,
   CaptchaConfig,
   Channel,
   ChannelPage,
   CostTrendPoint,
   DashboardSummary,
+  FeishuControlStatus,
   HealthProbeConfig,
   HealthProbeRun,
+  GatewayUsageStats,
   NotificationChannel,
   NotificationLogPage,
   Observation,
   ObservationKind,
+  RateComparisonResult,
+  RouteAdviceAudit,
+  RouteAdviceResult,
   RateChangeLogPage,
   RateSnapshot,
   SystemConfigResponse,
   UpstreamAnnouncementPage,
 } from "@/lib/api-types"
+import type { ChannelContext, ContextOverview, ContextTimelinePage } from "@/lib/context-types"
 
 export interface QueryState<T> {
   data: T | null
@@ -137,6 +147,20 @@ export function useDashboardSummary() {
   return useApi<DashboardSummary>("/dashboard/summary")
 }
 
+/** 本地自然日起止（RFC3339），用于网关用量「今日」统计 */
+function localDayRangeISO(day = new Date()): { from: string; to: string } {
+  const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0)
+  const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999)
+  return { from: start.toISOString(), to: end.toISOString() }
+}
+
+/** 网关使用记录聚合统计（默认今日本地时区） */
+export function useGatewayUsageStatsToday() {
+  const { from, to } = localDayRangeISO()
+  const qs = new URLSearchParams({ from, to })
+  return useApi<GatewayUsageStats>(`/gateway/usage/stats?${qs}`)
+}
+
 export function useAppVersion() {
   return useApi<AppVersion>("/version", false)
 }
@@ -149,8 +173,8 @@ export function useCostTrend(days = 7) {
   return useApi<CostTrendPoint[]>(`/dashboard/cost-trend?days=${days}`)
 }
 
-export function useChannels() {
-  return useApi<Channel[]>("/channels")
+export function useChannels(enabled = true) {
+  return useApi<Channel[]>(enabled ? "/channels" : null)
 }
 
 export function useChannelsPage(page = 1, pageSize = 9) {
@@ -159,6 +183,12 @@ export function useChannelsPage(page = 1, pageSize = 9) {
 
 export function useChannelRates(channelID: number | null) {
   return useApi<RateSnapshot[]>(channelID == null ? null : `/channels/${channelID}/rates`)
+}
+
+/** Loads the visible channel rate summaries with one bounded request instead of one request per row. */
+export function useChannelRateSummaries(channelIDs: number[]) {
+  const ids = [...new Set(channelIDs)].sort((a, b) => a - b)
+  return useApi<RateSnapshot[]>(ids.length > 0 ? `/channels/rates?ids=${ids.join(",")}` : null)
 }
 
 // useMultiChannelRates 把多个上游渠道的倍率分组拉回来合并去重，
@@ -206,11 +236,19 @@ export function useMultiChannelRates(channelIDs: number[]) {
   return { data, loading, refetch: () => setBump((b) => b + 1) }
 }
 
-export function useRateChanges(page = 1, pageSize = 20, channelID?: number) {
+export function useRateChanges(
+  page = 1,
+  pageSize = 20,
+  channelID?: number,
+  modelName?: string,
+  remoteGroupID?: number,
+) {
   const q = new URLSearchParams()
   q.set("page", String(page))
   q.set("page_size", String(pageSize))
   if (channelID != null) q.set("channel_id", String(channelID))
+  if (modelName) q.set("model_name", modelName)
+  if (remoteGroupID != null) q.set("remote_group_id", String(remoteGroupID))
   return useApi<RateChangeLogPage>(`/rate-changes?${q.toString()}`)
 }
 
@@ -260,4 +298,71 @@ export function useHealthProbeRuns(configID?: number, limit = 20) {
 
 export function useSystemConfig() {
   return useApi<SystemConfigResponse>("/settings/config")
+}
+
+
+export function useComparisonsRates(query = "", deviationPct = 20) {
+  const qs = new URLSearchParams()
+  if (query.trim()) qs.set("q", query.trim())
+  qs.set("deviation_pct", String(deviationPct))
+  return useApi<RateComparisonResult>(`/comparisons/rates?${qs.toString()}`)
+}
+
+export function useContextOverview(page = 1, pageSize = 20) {
+  return useApi<ContextOverview>(`/overview?page=${page}&page_size=${pageSize}`)
+}
+
+export function useChannelContext(channelID: number | null) {
+  return useApi<ChannelContext>(channelID == null ? null : `/channels/${channelID}/context`)
+}
+
+export function useContextTimeline(opts?: {
+  resourceKind?: string
+  resourceID?: number
+  source?: string
+  page?: number
+  pageSize?: number
+}) {
+  const q = new URLSearchParams()
+  q.set("page", String(opts?.page ?? 1))
+  q.set("page_size", String(opts?.pageSize ?? 20))
+  if (opts?.resourceKind) q.set("resource_kind", opts.resourceKind)
+  if (opts?.resourceID != null) q.set("resource_id", String(opts.resourceID))
+  if (opts?.source) q.set("source", opts.source)
+  return useApi<ContextTimelinePage>(`/timeline?${q.toString()}`)
+}
+
+export function useRouteAdvice(modelName: string) {
+  return useApi<RouteAdviceResult>(
+    modelName ? `/route-advice?model=${encodeURIComponent(modelName)}` : null,
+  )
+}
+
+export function useRouteAdviceAudits(modelName: string, limit = 20) {
+  const q = new URLSearchParams({ limit: String(limit) })
+  if (modelName) q.set("model", modelName)
+  return useApi<RouteAdviceAudit[]>(modelName ? `/route-advice/audits?${q.toString()}` : null)
+}
+
+export function useAdjustmentTargets() {
+  return useApi<AdjustmentTarget[]>("/adjustments/targets")
+}
+
+export function useAdjustmentConfig() {
+  return useApi<AdjustmentConfig>("/adjustments/config", false)
+}
+
+export function useAdjustmentGroups(targetID: number | null) {
+  return useApi<AdjustmentGroup[]>(
+    targetID == null ? null : `/adjustments/groups?target_id=${targetID}`,
+  )
+}
+
+export function useAdjustmentAudits(limit = 50) {
+  return useApi<AdjustmentAudit[]>(`/adjustments/audits?limit=${limit}`)
+}
+
+
+export function useFeishuControlStatus() {
+  return useApi<FeishuControlStatus>("/feishu/status")
 }

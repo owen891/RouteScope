@@ -104,6 +104,119 @@ type RateResult struct {
 	CompletionRatio float64
 }
 
+// ModelPriceInterval 是上游模型的按总 Token 数分段价，价格单位为 USD/token。
+type ModelPriceInterval struct {
+	MinTokens       int      `json:"min_tokens"`
+	MaxTokens       *int     `json:"max_tokens,omitempty"`
+	TierLabel       string   `json:"tier_label,omitempty"`
+	InputPrice      *float64 `json:"input_price,omitempty"`
+	OutputPrice     *float64 `json:"output_price,omitempty"`
+	CacheWritePrice *float64 `json:"cache_write_price,omitempty"`
+	CacheReadPrice  *float64 `json:"cache_read_price,omitempty"`
+	PerRequestPrice *float64 `json:"per_request_price,omitempty"`
+}
+
+// ModelPriceResult 是一个上游内部渠道、分组与模型的基础价目。
+// 价格保持上游返回的 USD/token，调用方负责叠加 RateMultiplier 并换算展示单位。
+type ModelPriceResult struct {
+	SourceName         string               `json:"source_name"`
+	SourceDescription  string               `json:"source_description,omitempty"`
+	Platform           string               `json:"platform"`
+	GroupID            int64                `json:"group_id"`
+	GroupName          string               `json:"group_name"`
+	RateMultiplier     float64              `json:"rate_multiplier"`
+	PeakRateEnabled    bool                 `json:"peak_rate_enabled"`
+	PeakRateMultiplier float64              `json:"peak_rate_multiplier"`
+	ModelName          string               `json:"model_name"`
+	BillingMode        string               `json:"billing_mode"`
+	InputPrice         *float64             `json:"input_price,omitempty"`
+	OutputPrice        *float64             `json:"output_price,omitempty"`
+	CacheWritePrice    *float64             `json:"cache_write_price,omitempty"`
+	CacheReadPrice     *float64             `json:"cache_read_price,omitempty"`
+	ImageInputPrice    *float64             `json:"image_input_price,omitempty"`
+	ImageOutputPrice   *float64             `json:"image_output_price,omitempty"`
+	PerRequestPrice    *float64             `json:"per_request_price,omitempty"`
+	Intervals          []ModelPriceInterval `json:"intervals,omitempty"`
+}
+
+// ModelPriceProvider 是支持读取上游公开给当前账号的模型价目的可选能力。
+type ModelPriceProvider interface {
+	GetModelPrices(ctx context.Context, channel *Channel, session *AuthSession) ([]ModelPriceResult, error)
+}
+
+// UsageAnalyticsQuery 描述上游真实消费统计的查询范围。
+type UsageAnalyticsQuery struct {
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	Granularity string `json:"granularity,omitempty"`
+}
+
+// UsageTotals 汇总上游账单接口返回的请求、Token、费用与耗时。
+type UsageTotals struct {
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	ActualCost          float64 `json:"actual_cost"`
+	StandardCost        float64 `json:"standard_cost"`
+	AverageDurationMS   float64 `json:"average_duration_ms,omitempty"`
+}
+
+// UsageModelStat 表示单个模型的真实用量和上游账单金额。
+type UsageModelStat struct {
+	Model               string  `json:"model"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	ActualCost          float64 `json:"actual_cost"`
+	StandardCost        float64 `json:"standard_cost"`
+}
+
+// UsageGroupStat 表示上游账号分组的真实用量和账单金额。
+type UsageGroupStat struct {
+	GroupID      int64   `json:"group_id"`
+	GroupName    string  `json:"group_name"`
+	Requests     int64   `json:"requests"`
+	TotalTokens  int64   `json:"total_tokens"`
+	ActualCost   float64 `json:"actual_cost"`
+	StandardCost float64 `json:"standard_cost"`
+}
+
+// UsageTrendPoint 表示一个时间粒度内的真实消费趋势点。
+type UsageTrendPoint struct {
+	Date                string  `json:"date"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	ActualCost          float64 `json:"actual_cost"`
+	StandardCost        float64 `json:"standard_cost"`
+}
+
+// UsageAnalytics 是单个上游渠道返回的真实消费统计。
+type UsageAnalytics struct {
+	Source      string            `json:"source"`
+	StartDate   string            `json:"start_date"`
+	EndDate     string            `json:"end_date"`
+	Granularity string            `json:"granularity"`
+	Totals      UsageTotals       `json:"totals"`
+	Models      []UsageModelStat  `json:"models"`
+	Groups      []UsageGroupStat  `json:"groups,omitempty"`
+	Trend       []UsageTrendPoint `json:"trend,omitempty"`
+}
+
+// UsageAnalyticsProvider 是支持真实消费统计的可选 connector 能力。
+type UsageAnalyticsProvider interface {
+	GetUsageAnalytics(ctx context.Context, channel *Channel, session *AuthSession, query UsageAnalyticsQuery) (*UsageAnalytics, error)
+}
+
 // AnnouncementResult 一条从上游同步到的公告。
 type AnnouncementResult struct {
 	SourceKey       string

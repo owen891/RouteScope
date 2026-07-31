@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/bejix/upstream-ops/backend/syncer"
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ func registerUpstreamSync(g *gin.RouterGroup, d *Deps) {
 	gp.POST("/targets/:id/groups/sync", func(c *gin.Context) { syncUpstreamSyncTargetGroups(c, d) })
 	gp.GET("/targets/:id/groups", func(c *gin.Context) { listUpstreamSyncTargetGroups(c, d) })
 	gp.GET("/targets/:id/proxies", func(c *gin.Context) { listUpstreamSyncTargetProxies(c, d) })
+	gp.GET("/targets/:id/upstreams", func(c *gin.Context) { listUpstreamSyncTargetUpstreams(c, d) })
 	gp.GET("/source-models", func(c *gin.Context) { listUpstreamSyncSourceModels(c, d) })
 	gp.GET("/sync-groups", func(c *gin.Context) { listUpstreamSyncGroups(c, d) })
 	gp.POST("/sync-groups", func(c *gin.Context) { createUpstreamSyncGroup(c, d) })
@@ -138,6 +140,34 @@ func listUpstreamSyncTargetProxies(c *gin.Context, d *Deps) {
 	list, err := d.UpstreamSync.ListTargetProxies(c.Request.Context(), id)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+func listUpstreamSyncTargetUpstreams(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	rawIDs := strings.TrimSpace(c.Query("group_ids"))
+	if rawIDs == "" {
+		c.JSON(http.StatusOK, gin.H{"data": []syncer.TargetUpstreamDTO{}})
+		return
+	}
+	groupIDs := make([]uint, 0)
+	for _, raw := range strings.Split(rawIDs, ",") {
+		parsed, parseErr := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+		if parseErr != nil || parsed == 0 {
+			fail(c, http.StatusBadRequest, errors.New("group_ids must contain positive integers"))
+			return
+		}
+		groupIDs = append(groupIDs, uint(parsed))
+	}
+	list, err := d.UpstreamSync.ListTargetUpstreams(c.Request.Context(), id, groupIDs)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list})

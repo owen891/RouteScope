@@ -11,6 +11,7 @@ import {
   Plus,
   Play,
   RefreshCw,
+  Search,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -84,6 +85,7 @@ import type {
   UpstreamSyncTarget,
   UpstreamSyncTargetGroup,
   UpstreamSyncTargetProxy,
+  UpstreamSyncTargetUpstream,
 } from "@/lib/api-types";
 
 interface TargetForm {
@@ -115,6 +117,8 @@ interface SyncGroupForm {
 
 interface SyncAccountForm {
   id?: number;
+  source_mode: "local" | "target";
+  target_account_id: string;
   source_channel_id: number;
   source_group_id: string;
   source_group_name: string;
@@ -154,6 +158,8 @@ const emptySyncGroupForm: SyncGroupForm = {
 };
 
 const emptySyncAccountForm: SyncAccountForm = {
+  source_mode: "local",
+  target_account_id: "",
   source_channel_id: 0,
   source_group_id: "",
   source_group_name: "",
@@ -201,6 +207,9 @@ function platformLabel(value?: string) {
 function accountToForm(account: UpstreamSyncAccount): SyncAccountForm {
   return {
     id: account.id,
+    source_mode: account.source_mode === "target" ? "target" : "local",
+    target_account_id:
+      account.target_account_id == null ? "" : String(account.target_account_id),
     source_channel_id: account.source_channel_id,
     source_group_id:
       account.source_group_id == null ? "" : String(account.source_group_id),
@@ -275,10 +284,11 @@ function sourceGroupOptionValue(group: RateSnapshot) {
 }
 
 function sourceGroupSelectValue(account: SyncAccountForm) {
+  // 有 remote id 时优先 id 匹配选项（sub2api）；名称仅用于展示
+  if (account.source_group_id) return `id:${account.source_group_id}`;
   if (account.source_group_name.trim()) {
     return `name:${account.source_group_name.trim()}`;
   }
-  if (account.source_group_id) return `id:${account.source_group_id}`;
   return "none";
 }
 
@@ -437,6 +447,10 @@ export function UpstreamSyncSettings() {
   const [targetProxies, setTargetProxies] = useState<UpstreamSyncTargetProxy[]>(
     [],
   );
+  const [targetUpstreams, setTargetUpstreams] = useState<
+    UpstreamSyncTargetUpstream[]
+  >([]);
+  const [targetUpstreamsLoading, setTargetUpstreamsLoading] = useState(false);
   const [sourceGroupsByChannel, setSourceGroupsByChannel] = useState<
     Record<number, RateSnapshot[]>
   >({});
@@ -463,11 +477,25 @@ export function UpstreamSyncSettings() {
     if (!syncGroupForm.target_id) {
       setTargetGroups([]);
       setTargetProxies([]);
+      setTargetUpstreams([]);
       return;
     }
     void loadTargetGroups(syncGroupForm.target_id);
     void loadTargetProxies(syncGroupForm.target_id);
   }, [syncGroupForm.target_id]);
+
+  useEffect(() => {
+    const targetID = syncGroupForm.target_id;
+    const groupIDs = syncGroupForm.target_group_ids;
+    if (!targetID || groupIDs.length === 0) {
+      setTargetUpstreams([]);
+      return;
+    }
+    void loadTargetUpstreams(targetID, groupIDs);
+  }, [
+    syncGroupForm.target_id,
+    syncGroupForm.target_group_ids.join(","),
+  ]);
 
   useEffect(() => {
     if (!logSyncGroupID) return;
@@ -570,6 +598,8 @@ export function UpstreamSyncSettings() {
       setLogSyncGroupID(null);
       return;
     }
+    setTargetGroups([]);
+    setTargetUpstreams([]);
     setSelectedTargetID(target.id);
     setLogs([]);
     setLogSyncGroupID(null);
@@ -577,17 +607,61 @@ export function UpstreamSyncSettings() {
     void loadTargetProxies(target.id);
   }
 
-  function openNewSyncGroupDialog(targetID = selectedTargetID) {
-    if (!targetID) return;
-    setSelectedTargetID(targetID);
-    setSyncGroupForm({
-      ...emptySyncGroupForm,
-      target_id: targetID,
-      accounts: [{ ...emptySyncAccountForm }],
-    });
-    setSyncGroupDialogOpen(true);
-    void loadTargetGroups(targetID);
-    void loadTargetProxies(targetID);
+  async function fetchTargetUpstreams(
+    targetID: number,
+    groupIDs: number[],
+  ): Promise<UpstreamSyncTargetUpstream[]> {
+    return apiFetch<UpstreamSyncTargetUpstream[]>(
+      `/upstream-sync/targets/${targetID}/upstreams?group_ids=${groupIDs.join(",")}`,
+    );
+  }
+
+  async function loadTargetUpstreams(targetID: number, groupIDs: number[]) {
+    setTargetUpstreamsLoading(true);
+    try {
+      const list = await fetchTargetUpstreams(targetID, groupIDs);
+      setTargetUpstreams(list);
+      setSyncGroupForm((prev) => {
+        if (
+          prev.target_id !== targetID ||
+          prev.accounts.some(
+            (account) =>
+              account.source_mode === "local" &&
+              (account.source_channel_id > 0 ||
+                account.source_group_id.trim() !== "" ||
+                account.source_group_name.trim() !== ""),
+          )
+        ) {
+          return prev;
+        }
+        const existingByTargetID = new Map(
+          prev.accounts
+            .filter((account) => account.source_mode === "target")
+            .map((account) => [account.target_account_id, account]),
+        );
+        const accounts = list.map((upstream) => ({
+          ...emptySyncAccountForm,
+          ...(existingByTargetID.get(String(upstream.id)) ?? {}),
+          source_mode: "target" as const,
+          target_account_id: String(upstream.id),
+          rate_convert_mode: "custom" as const,
+          rate_convert_value: upstream.rate_multiplier || 1,
+          concurrency: upstream.concurrency || 10,
+          weight: upstream.load_factor || 1,
+          proxy_id:
+            upstream.proxy_id == null ? "" : String(upstream.proxy_id),
+          enabled:
+            upstream.status.toLowerCase() !== "inactive" &&
+            upstream.status.toLowerCase() !== "disabled",
+        }));
+        return { ...prev, accounts };
+      });
+    } catch (err) {
+      setTargetUpstreams([]);
+      toast.error(err instanceof Error ? err.message : "读取目标站点上游失败");
+    } finally {
+      setTargetUpstreamsLoading(false);
+    }
   }
 
   function openEditSyncGroupDialog(syncGroup: UpstreamSyncGroup) {
@@ -657,21 +731,30 @@ export function UpstreamSyncSettings() {
 
   async function syncTargetGroups(target: UpstreamSyncTarget) {
     setBusy(`groups-${target.id}`);
+    setSelectedTargetID(target.id);
+    setTargetGroups([]);
+    setTargetUpstreams([]);
+    setTargetUpstreamsLoading(true);
     try {
-      await apiFetch(`/upstream-sync/targets/${target.id}/groups/sync`, {
-        method: "POST",
-      });
-      if (
-        syncGroupForm.target_id === target.id ||
-        selectedTargetID === target.id
-      ) {
-        await loadTargetGroups(target.id);
-        await loadTargetProxies(target.id);
-      }
-      toast.success(`${target.name} 分组已同步`);
+      const groups = await apiFetch<UpstreamSyncTargetGroup[]>(
+        `/upstream-sync/targets/${target.id}/groups/sync`,
+        { method: "POST" },
+      );
+      setTargetGroups(groups);
+      await loadTargetProxies(target.id);
+      const upstreams = await fetchTargetUpstreams(
+        target.id,
+        groups.map((group) => group.id),
+      );
+      setTargetUpstreams(upstreams);
+      toast.success(
+        `${target.name} 已抓取 ${groups.length} 个分组、${upstreams.length} 个上游`,
+      );
     } catch (err) {
+      setTargetUpstreams([]);
       toast.error(err instanceof Error ? err.message : "同步分组失败");
     } finally {
+      setTargetUpstreamsLoading(false);
       setBusy(null);
     }
   }
@@ -761,6 +844,10 @@ export function UpstreamSyncSettings() {
           : "",
       accounts: sortedAccounts.map(({ account }) => ({
         ...account,
+        target_account_id: account.target_account_id
+          ? Number(account.target_account_id)
+          : null,
+        source_mode: account.source_mode,
         source_group_id: account.source_group_id
           ? Number(account.source_group_id)
           : null,
@@ -775,11 +862,19 @@ export function UpstreamSyncSettings() {
     const targetID = selectedTargetID ?? syncGroupForm.target_id;
     setBusy("sync-group");
     try {
-      const missingChannelIndex = syncGroupForm.accounts.findIndex(
-        (account) => !account.source_channel_id,
+      const missingSourceIndex = syncGroupForm.accounts.findIndex(
+        (account) =>
+          account.source_mode === "target"
+            ? !account.target_account_id
+            : !account.source_channel_id,
       );
-      if (missingChannelIndex >= 0) {
-        toast.error(`同步账号${missingChannelIndex + 1}未选择源渠道`);
+      if (missingSourceIndex >= 0) {
+        const missingAccount = syncGroupForm.accounts[missingSourceIndex];
+        toast.error(
+          missingAccount?.source_mode === "target"
+            ? `同步账号${missingSourceIndex + 1}未绑定目标上游`
+            : `同步账号${missingSourceIndex + 1}未选择源渠道`,
+        );
         return;
       }
       const path = syncGroupForm.id
@@ -898,7 +993,7 @@ export function UpstreamSyncSettings() {
     <div className="space-y-5">
       <Panel
         title="Sub2API 上游列表"
-        description="主列表只展示可写入的 Sub2API 上游；点击分组管理后在对应卡片内维护同步分组。"
+        description="点击同步分组后，直接抓取目标站点的全部分组和上游账号。"
         action={
           <Button
             size="sm"
@@ -915,14 +1010,11 @@ export function UpstreamSyncSettings() {
         ) : (
           <div className="space-y-3">
             {targets.map((target) => {
-              const syncGroupCount = syncGroupList.filter(
-                (syncGroup) => syncGroup.target_id === target.id,
-              ).length;
               const isGroupOpen = selectedTargetID === target.id;
               return (
                 <div
                   key={target.id}
-                  className="rounded-2xl border border-border bg-background/80 p-4"
+                  className="rounded-md border border-border bg-muted/45 p-4"
                 >
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 space-y-1">
@@ -936,12 +1028,14 @@ export function UpstreamSyncSettings() {
                         {target.last_check_status ? (
                           <StatusBadge status={target.last_check_status} />
                         ) : null}
-                        <Badge
-                          variant="outline"
-                          className="border-border bg-muted/40"
-                        >
-                          {syncGroupCount} 个同步分组
-                        </Badge>
+                        {isGroupOpen && targetGroups.length > 0 ? (
+                          <Badge
+                            variant="outline"
+                            className="border-border bg-muted/40"
+                          >
+                            {targetGroups.length} 个分组
+                          </Badge>
+                        ) : null}
                       </div>
                       <p className="break-all text-xs text-muted-foreground">
                         {target.base_url}
@@ -960,6 +1054,29 @@ export function UpstreamSyncSettings() {
                             ? `上次检测 ${relativeTime(target.last_check_at)}`
                             : "尚未检测"}
                       </p>
+                      {target.last_check_error ? (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2.5 text-xs"
+                            onClick={() => openTargetDialog(target)}
+                          >
+                            <PencilLine className="size-3.5" />
+                            修复凭据
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2.5 text-xs"
+                            disabled={busy === `check-${target.id}`}
+                            onClick={() => checkTarget(target)}
+                          >
+                            <RefreshCw className={cn("size-3.5", busy === `check-${target.id}` && "animate-spin")} />
+                            重新检测
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex w-full items-center gap-2 xl:w-auto xl:justify-end">
                       <Button
@@ -979,8 +1096,13 @@ export function UpstreamSyncSettings() {
                         onClick={() => syncTargetGroups(target)}
                         disabled={busy === `groups-${target.id}`}
                       >
-                        <RefreshCw className="size-3.5" />
-                        同步分组
+                        <RefreshCw
+                          className={cn(
+                            "size-3.5",
+                            busy === `groups-${target.id}` && "animate-spin",
+                          )}
+                        />
+                        {busy === `groups-${target.id}` ? "抓取中" : "同步分组"}
                       </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -1021,18 +1143,26 @@ export function UpstreamSyncSettings() {
                   </div>
                   {isGroupOpen ? (
                     <div className="mt-4 border-t border-border pt-4">
-                      <SyncGroupList
-                        syncGroups={targetSyncGroups}
-                        busy={busy}
-                        onAdd={() => openNewSyncGroupDialog(target.id)}
-                        onRefresh={() => refreshSyncGroups(target)}
-                        refreshBusy={busy === `sync-groups-refresh-${target.id}`}
-                        onApply={applySyncGroup}
-                        onLogs={loadLogs}
-                        onEdit={openEditSyncGroupDialog}
-                        onDeleteManaged={deleteManaged}
-                        onDelete={deleteSyncGroup}
+                      <TargetGroupOverview
+                        groups={targetGroups}
+                        upstreams={targetUpstreams}
+                        loading={targetUpstreamsLoading}
                       />
+                      {targetSyncGroups.length > 0 ? (
+                        <div className="mt-5 border-t border-border pt-4">
+                          <SyncGroupList
+                            syncGroups={targetSyncGroups}
+                            busy={busy}
+                            onRefresh={() => refreshSyncGroups(target)}
+                            refreshBusy={busy === `sync-groups-refresh-${target.id}`}
+                            onApply={applySyncGroup}
+                            onLogs={loadLogs}
+                            onEdit={openEditSyncGroupDialog}
+                            onDeleteManaged={deleteManaged}
+                            onDelete={deleteSyncGroup}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -1156,6 +1286,8 @@ export function UpstreamSyncSettings() {
             sourceGroupsByChannel={sourceGroupsByChannel}
             targetGroups={targetGroups}
             targetProxies={targetProxies}
+            targetUpstreams={targetUpstreams}
+            targetUpstreamsLoading={targetUpstreamsLoading}
             channels={channels.data ?? []}
             busy={busy}
             onChange={setSyncGroupForm}
@@ -1247,10 +1379,241 @@ export function UpstreamSyncSettings() {
   );
 }
 
+function TargetGroupOverview({
+  groups,
+  upstreams,
+  loading,
+}: {
+  groups: UpstreamSyncTargetGroup[];
+  upstreams: UpstreamSyncTargetUpstream[];
+  loading: boolean;
+}) {
+  const [selectedGroupID, setSelectedGroupID] = useState<number | null>(null);
+  const [accountQuery, setAccountQuery] = useState("");
+  const upstreamsByGroup = useMemo(() => {
+    const grouped = new Map<number, UpstreamSyncTargetUpstream[]>();
+    for (const upstream of upstreams) {
+      for (const groupID of upstream.group_ids) {
+        const groupUpstreams = grouped.get(groupID) ?? [];
+        groupUpstreams.push(upstream);
+        grouped.set(groupID, groupUpstreams);
+      }
+    }
+    return grouped;
+  }, [upstreams]);
+  const selectedGroup =
+    groups.find((group) => group.id === selectedGroupID) ?? null;
+  const selectedGroupUpstreams = selectedGroup
+    ? (upstreamsByGroup.get(selectedGroup.remote_group_id) ?? [])
+    : [];
+  const normalizedQuery = accountQuery.trim().toLowerCase();
+  const filteredGroupUpstreams = normalizedQuery
+    ? selectedGroupUpstreams.filter((upstream) =>
+        [upstream.name, upstream.platform, upstream.type, String(upstream.id)]
+          .filter(Boolean)
+          .some((value) => value?.toLowerCase().includes(normalizedQuery)),
+      )
+    : selectedGroupUpstreams;
+
+  function openAccounts(group: UpstreamSyncTargetGroup) {
+    setAccountQuery("");
+    setSelectedGroupID(group.id);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-foreground">目标站点分组</p>
+          <p className="text-xs text-muted-foreground">
+            同步结果直接来自目标站点，账号按远端分组归类。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">{groups.length} 个分组</Badge>
+          <Badge variant="outline">{upstreams.length} 个上游</Badge>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex min-h-28 items-center justify-center gap-2 rounded-md border border-dashed border-border text-sm text-muted-foreground">
+          <RefreshCw className="size-4 animate-spin" />
+          正在抓取目标站点分组和上游账号
+        </div>
+      ) : groups.length === 0 ? (
+        <EmptyBox text="点击上方“同步分组”抓取目标站点数据。" />
+      ) : (
+        <div className="overflow-x-auto rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="min-w-48">分组</TableHead>
+                <TableHead className="min-w-24">平台</TableHead>
+                <TableHead className="min-w-24">倍率</TableHead>
+                <TableHead className="min-w-40">上游账号</TableHead>
+                <TableHead className="min-w-20">状态</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {groups.map((group) => {
+                const groupUpstreams =
+                  upstreamsByGroup.get(group.remote_group_id) ?? [];
+                return (
+                  <TableRow key={group.id}>
+                    <TableCell>
+                      <div className="font-medium text-foreground">
+                        {group.name}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        远端 ID {group.remote_group_id}
+                      </div>
+                    </TableCell>
+                    <TableCell>{platformLabel(group.platform)}</TableCell>
+                    <TableCell>{formatRatio(group.ratio)}</TableCell>
+                    <TableCell>
+                      {groupUpstreams.length > 0 ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          onClick={() => openAccounts(group)}
+                          aria-label={`查看 ${group.name} 的 ${groupUpstreams.length} 个账号`}
+                        >
+                          <ListTree className="size-3.5" />
+                          查看 {groupUpstreams.length} 个账号
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          暂无上游账号
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={group.status || "active"} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <Dialog
+        open={selectedGroup != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedGroupID(null);
+            setAccountQuery("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>{selectedGroup?.name ?? "上游账号"}</DialogTitle>
+            <DialogDescription>
+              远端分组 ID {selectedGroup?.remote_group_id ?? "-"} · 显示{" "}
+              {filteredGroupUpstreams.length} / {selectedGroupUpstreams.length} 个账号
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="搜索上游账号"
+              value={accountQuery}
+              onChange={(event) => setAccountQuery(event.target.value)}
+              placeholder="搜索账号名称、平台或类型"
+              className="pl-9"
+            />
+          </div>
+
+          <div className="max-h-[60vh] overflow-auto rounded-md border border-border">
+            <Table aria-label="分组上游账号">
+              <TableHeader className="sticky top-0 z-10 bg-background">
+                <TableRow>
+                  <TableHead className="min-w-64">账号名称</TableHead>
+                  <TableHead className="min-w-32">平台 / 类型</TableHead>
+                  <TableHead>倍率</TableHead>
+                  <TableHead>权重</TableHead>
+                  <TableHead>并发</TableHead>
+                  <TableHead>优先级</TableHead>
+                  <TableHead className="min-w-36">状态</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredGroupUpstreams.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={7}
+                      className="h-24 text-center text-sm text-muted-foreground"
+                    >
+                      没有匹配的上游账号
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredGroupUpstreams.map((upstream) => {
+                    const accountName =
+                      upstream.name || `账号 #${upstream.id}`;
+                    return (
+                      <TableRow key={upstream.id}>
+                        <TableCell>
+                          <div className="max-w-72">
+                            <div
+                              className="truncate font-medium text-foreground"
+                              title={accountName}
+                            >
+                              {accountName}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              ID {upstream.id}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>{platformLabel(upstream.platform)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {upstream.type || "未分类"}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {formatRate(upstream.rate_multiplier)}
+                        </TableCell>
+                        <TableCell>{formatRate(upstream.load_factor)}</TableCell>
+                        <TableCell>{upstream.concurrency}</TableCell>
+                        <TableCell>{upstream.priority}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1.5">
+                            <StatusBadge status={upstream.status || "unknown"} />
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "border-transparent",
+                                upstream.schedulable
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-danger/10 text-danger",
+                              )}
+                            >
+                              {upstream.schedulable ? "可调度" : "不可调度"}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function SyncGroupList({
   syncGroups,
   busy,
-  onAdd,
   onRefresh,
   refreshBusy,
   onApply,
@@ -1261,7 +1624,6 @@ function SyncGroupList({
 }: {
   syncGroups: UpstreamSyncGroup[];
   busy: string | null;
-  onAdd: () => void;
   onRefresh: () => void;
   refreshBusy: boolean;
   onApply: (syncGroup: UpstreamSyncGroup) => void;
@@ -1274,7 +1636,7 @@ function SyncGroupList({
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <p className="text-sm font-semibold text-foreground">同步分组</p>
+          <p className="text-sm font-semibold text-foreground">已有同步规则</p>
           <p className="text-xs text-muted-foreground">
             保存同步分组不会写远端，点击应用才会创建或更新托管对象。
           </p>
@@ -1291,10 +1653,6 @@ function SyncGroupList({
             />
             刷新
           </Button>
-          <Button size="sm" onClick={onAdd}>
-            <Plus className="size-3.5" />
-            新增分组
-          </Button>
         </div>
       </div>
       {syncGroups.length === 0 ? (
@@ -1306,7 +1664,7 @@ function SyncGroupList({
             return (
               <div
                 key={syncGroup.id}
-                className="rounded-xl border border-border bg-background/80 p-3 sm:p-4"
+                className="surface-panel p-3 sm:p-4"
               >
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                   <div className="min-w-0 space-y-1">
@@ -1415,6 +1773,8 @@ function SyncGroupFormView({
   sourceGroupsByChannel,
   targetGroups,
   targetProxies,
+  targetUpstreams,
+  targetUpstreamsLoading,
   channels,
   busy,
   onChange,
@@ -1427,6 +1787,8 @@ function SyncGroupFormView({
   sourceGroupsByChannel: Record<number, RateSnapshot[]>;
   targetGroups: UpstreamSyncTargetGroup[];
   targetProxies: UpstreamSyncTargetProxy[];
+  targetUpstreams: UpstreamSyncTargetUpstream[];
+  targetUpstreamsLoading: boolean;
   channels: { id: number; name: string }[];
   busy: string | null;
   onChange: React.Dispatch<React.SetStateAction<SyncGroupForm>>;
@@ -1461,9 +1823,16 @@ function SyncGroupFormView({
       syncGroupForm.rate_sort_direction,
     ],
   );
+  const targetAccountsOnly =
+    syncGroupForm.accounts.length > 0 &&
+    syncGroupForm.accounts.every((account) => account.source_mode === "target");
   const testModelOptions = useMemo(
     () => splitModelInput(syncGroupForm.model_limits),
     [syncGroupForm.model_limits],
+  );
+  const targetUpstreamByID = useMemo(
+    () => new Map(targetUpstreams.map((upstream) => [String(upstream.id), upstream])),
+    [targetUpstreams],
   );
   const [sourceModelsByRow, setSourceModelsByRow] = useState<
     Record<number, string[]>
@@ -1833,12 +2202,80 @@ function SyncGroupFormView({
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-background/80 p-3 sm:p-4">
+      {syncGroupForm.target_group_ids.length > 0 ? (
+        <section className="rounded-lg border border-border bg-background/80 p-3 sm:p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                已发现的目标上游
+              </p>
+              <p className="text-xs text-muted-foreground">
+                直接来自所选目标分组，保存后只更新这些远端账号的运行参数。
+              </p>
+            </div>
+            {targetUpstreamsLoading ? (
+              <RefreshCw className="size-4 animate-spin text-muted-foreground" />
+            ) : (
+              <Badge variant="outline">{targetUpstreams.length} 个</Badge>
+            )}
+          </div>
+          {targetUpstreamsLoading ? (
+            <p className="text-sm text-muted-foreground">正在读取目标站点...</p>
+          ) : targetUpstreams.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              所选分组暂时没有远端上游。可以添加本地来源作为新上游。
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>上游账号</TableHead>
+                    <TableHead>所属目标分组</TableHead>
+                    <TableHead>倍率</TableHead>
+                    <TableHead>权重</TableHead>
+                    <TableHead>并发</TableHead>
+                    <TableHead>状态</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {targetUpstreams.map((upstream) => (
+                    <TableRow key={upstream.id}>
+                      <TableCell className="font-medium">
+                        <div>{upstream.name || `账号 #${upstream.id}`}</div>
+                        <div className="text-xs text-muted-foreground">
+                          ID {upstream.id}
+                          {upstream.platform ? ` · ${upstream.platform}` : ""}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-72 text-xs text-muted-foreground">
+                        {upstream.group_names.join("、")}
+                      </TableCell>
+                      <TableCell>{formatRate(upstream.rate_multiplier)}</TableCell>
+                      <TableCell>{formatRate(upstream.load_factor || 1)}</TableCell>
+                      <TableCell>{upstream.concurrency || 10}</TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          status={upstream.status || "unknown"}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <section className="surface-panel p-3 sm:p-4">
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
             <p className="text-sm font-semibold text-foreground">同步账号</p>
             <p className="text-xs text-muted-foreground">
-              每行会独立创建源 API Key 和目标账号。
+              {targetAccountsOnly
+                ? "已按目标分组读取远端上游，可直接调整运行参数。"
+                : "可添加本地渠道账号，应用时写入目标站点。"}
             </p>
           </div>
           <Button
@@ -1848,7 +2285,7 @@ function SyncGroupFormView({
             onClick={addAccount}
           >
             <Plus className="size-3.5" />
-            添加账号
+            {targetAccountsOnly ? "添加本地账号" : "添加账号"}
           </Button>
         </div>
 
@@ -1856,8 +2293,12 @@ function SyncGroupFormView({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-44">源渠道</TableHead>
-                <TableHead className="min-w-44">源分组</TableHead>
+                <TableHead className="min-w-44">
+                  {targetAccountsOnly ? "目标上游" : "源渠道"}
+                </TableHead>
+                <TableHead className="min-w-44">
+                  {targetAccountsOnly ? "目标分组" : "源分组"}
+                </TableHead>
                 <TableHead className="min-w-28">倍率换算</TableHead>
                 <TableHead className="min-w-32">账号计费倍率</TableHead>
                 <TableHead className="min-w-28">权重/负载</TableHead>
@@ -1898,9 +2339,24 @@ function SyncGroupFormView({
                   selectedTestModel,
                 ]);
                 const isLoadingModels = sourceModelsLoadingByRow[index];
+                const targetUpstream =
+                  account.source_mode === "target"
+                    ? targetUpstreamByID.get(account.target_account_id)
+                    : undefined;
                 return (
                   <TableRow key={account.id ?? index}>
                     <TableCell>
+                      {account.source_mode === "target" ? (
+                        <div className="min-w-44 space-y-1">
+                          <div className="truncate font-medium">
+                            {targetUpstream?.name ??
+                              `目标账号 #${account.target_account_id || "?"}`}
+                          </div>
+                          <Badge variant="outline" className="text-[10px]">
+                            目标站点
+                          </Badge>
+                        </div>
+                      ) : (
                       <Select
                         value={
                           account.source_channel_id
@@ -1940,8 +2396,15 @@ function SyncGroupFormView({
                           ))}
                         </SelectContent>
                       </Select>
+                      )}
                     </TableCell>
                     <TableCell>
+                      {account.source_mode === "target" ? (
+                        <div className="min-w-44 text-xs text-muted-foreground">
+                          {targetUpstream?.group_names.join("、") ||
+                            "目标分组"}
+                        </div>
+                      ) : (
                       <Select
                         value={sourceGroupSelectValue(account)}
                         onValueChange={(value) => {
@@ -1953,10 +2416,11 @@ function SyncGroupFormView({
                               sourceGroup?.remote_group_id == null
                                 ? ""
                                 : String(sourceGroup.remote_group_id),
+                            // 有 ID 时也保留名称（sub2api）；仅 none 时清空
                             source_group_name:
-                              value === "none" || sourceGroup?.remote_group_id != null
+                              value === "none"
                                 ? ""
-                                : sourceGroup?.model_name ?? "",
+                                : (sourceGroup?.model_name ?? "").trim(),
                             test_model: "",
                           };
                           const nextAccount = { ...account, ...patch };
@@ -1997,6 +2461,7 @@ function SyncGroupFormView({
                           ))}
                         </SelectContent>
                       </Select>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Select
@@ -2168,8 +2633,8 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-3xl border border-border/80 bg-muted/20 p-5">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <section className="surface-panel overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-5">
         <div className="space-y-1">
           <p className="text-sm font-semibold text-foreground">{title}</p>
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
@@ -2178,7 +2643,7 @@ function Panel({
         </div>
         {action}
       </div>
-      {children}
+      <div className="p-4 sm:p-5">{children}</div>
     </section>
   );
 }
@@ -2212,7 +2677,7 @@ function SwitchLine({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-background/90 px-4 py-3">
+    <div className="surface-panel flex items-start justify-between gap-4 px-4 py-3">
       <div className="space-y-1">
         <Label htmlFor={id} className="text-sm font-medium text-foreground">
           {label}
@@ -2238,7 +2703,7 @@ function CompactSwitchLine({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-background/90 px-3">
+    <div className="flex h-9 items-center justify-between gap-3 rounded-md border border-border bg-muted/45 px-3">
       <Label htmlFor={id} className="text-xs font-medium text-foreground">
         {label}
       </Label>
@@ -2406,7 +2871,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function EmptyBox({ text }: { text: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border bg-background/70 px-4 py-6 text-sm text-muted-foreground">
+    <div className="surface-empty px-4 py-6 text-sm text-muted-foreground">
       {text}
     </div>
   );

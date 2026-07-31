@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +19,19 @@ func (r *Observations) Append(o *Observation) error {
 		o.SampledAt = time.Now()
 	}
 	return r.db.Create(o).Error
+}
+
+func (r *Observations) Latest(channelID uint, kind ObservationKind) (*Observation, error) {
+	var item Observation
+	err := r.db.Where("channel_id = ? AND kind = ?", channelID, kind).
+		Order("sampled_at DESC").Order("id DESC").First(&item).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 type ObservationQuery struct {

@@ -20,6 +20,33 @@ func TestLoadAppliesUpstreamDefaults(t *testing.T) {
 	if cfg.Upstream.UserAgent != DefaultUpstreamUserAgent {
 		t.Fatalf("user agent = %q", cfg.Upstream.UserAgent)
 	}
+	if cfg.Adjustment.GrossMarginPct != 0 {
+		t.Fatalf("gross margin = %v", cfg.Adjustment.GrossMarginPct)
+	}
+}
+
+func TestAdjustmentConfigReadsLegacyMarkupField(t *testing.T) {
+	cfg := AdjustmentConfig{ProfitMarginPct: 12.5}
+	if got := cfg.EffectiveGrossMarginPct(); got != 12.5 {
+		t.Fatalf("effective gross margin = %v", got)
+	}
+}
+
+func TestRequiresAdminAuth(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		want bool
+	}{
+		{mode: "release", want: true},
+		{mode: " Production ", want: true},
+		{mode: "debug", want: false},
+		{mode: "test", want: false},
+		{mode: "", want: false},
+	} {
+		if got := RequiresAdminAuth(tc.mode); got != tc.want {
+			t.Errorf("RequiresAdminAuth(%q) = %t, want %t", tc.mode, got, tc.want)
+		}
+	}
 }
 
 func TestUpstreamConfigWithDefaultsKeepsCustomUserAgent(t *testing.T) {
@@ -194,5 +221,103 @@ func TestSaveRenameFailurePreservesExistingConfig(t *testing.T) {
 	}
 	if string(got) != string(original) {
 		t.Fatalf("existing config changed after failed rename: got %q, want %q", got, original)
+	}
+}
+
+func TestGatewayConfigWithDefaults(t *testing.T) {
+	cfg := GatewayConfig{}.WithDefaults()
+	if cfg.TempPauseSeconds != DefaultGatewayTempPauseSeconds {
+		t.Fatalf("temp pause = %d", cfg.TempPauseSeconds)
+	}
+	if cfg.ForwardTimeoutSeconds != DefaultGatewayForwardTimeoutSeconds {
+		t.Fatalf("forward timeout = %d", cfg.ForwardTimeoutSeconds)
+	}
+	if cfg.RouteBatchConcurrency != DefaultGatewayRouteBatchConcurrency {
+		t.Fatalf("batch concurrency = %d", cfg.RouteBatchConcurrency)
+	}
+	custom := GatewayConfig{RouteBatchConcurrency: 16, ForwardTimeoutSeconds: 120}.WithDefaults()
+	if custom.RouteBatchConcurrency != 16 || custom.ForwardTimeoutSeconds != 120 {
+		t.Fatalf("custom = %#v", custom)
+	}
+	if custom.ModelsCacheTTLSeconds != DefaultGatewayModelsCacheTTLSeconds {
+		t.Fatalf("models cache ttl = %d", custom.ModelsCacheTTLSeconds)
+	}
+}
+
+func TestLoadFeishuSecretsFromFilesAndEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	for name, value := range map[string]string{
+		"app-secret":         "file-app-secret\n",
+		"verification-token": "file-verification-token\n",
+		"encrypt-key":        "file-encrypt-key\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := Save(path, &Config{Feishu: FeishuConfig{
+		Enabled:               true,
+		AppID:                 "test-app-id",
+		AppSecretFile:         "app-secret",
+		VerificationTokenFile: "verification-token",
+		EncryptKeyFile:        "encrypt-key",
+	}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Setenv("FEISHU_APP_SECRET", "env-app-secret")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Feishu.AppSecret != "env-app-secret" {
+		t.Fatalf("app secret = %q", cfg.Feishu.AppSecret)
+	}
+	if cfg.Feishu.VerificationToken != "file-verification-token" || cfg.Feishu.EncryptKey != "file-encrypt-key" {
+		t.Fatalf("resolved Feishu secrets are incomplete")
+	}
+	if cfg.Feishu.CallbackPath != "/callbacks/feishu" || cfg.Feishu.BindCodeTTLMinutes != 10 || cfg.Feishu.BindCodeMaxAttempts != 5 {
+		t.Fatalf("Feishu defaults = %#v", cfg.Feishu)
+	}
+}
+
+func TestLoadFeishuSecretFileFailureDoesNotExposeContents(t *testing.T) {
+	t.Setenv("FEISHU_APP_SECRET", "")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, &Config{Feishu: FeishuConfig{
+		Enabled:       true,
+		AppSecretFile: "missing-secret",
+	}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "read Feishu App Secret file") {
+		t.Fatalf("Load error = %v", err)
+	}
+}
+
+func TestSaveDoesNotPersistFeishuSecretValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := &Config{Feishu: FeishuConfig{
+		AppSecret:         "sentinel-feishu-app-secret",
+		VerificationToken: "sentinel-feishu-verification-token",
+		EncryptKey:        "sentinel-feishu-encrypt-key",
+		AppSecretFile:     "/run/secrets/feishu-app-secret",
+	}}
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	for _, secret := range []string{cfg.Feishu.AppSecret, cfg.Feishu.VerificationToken, cfg.Feishu.EncryptKey} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("config file contains Feishu secret %q", secret)
+		}
+	}
+	if !strings.Contains(string(body), cfg.Feishu.AppSecretFile) {
+		t.Fatal("config file did not retain the non-secret file path")
 	}
 }

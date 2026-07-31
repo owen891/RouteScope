@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Download,
   HardDrive,
   Bell,
   Clock3,
-  MonitorCog,
   KeyRound,
+  MonitorCog,
   Network,
   PencilLine,
   Plus,
@@ -15,27 +15,20 @@ import {
   Server,
   ShieldCheck,
   Trash2,
+  Upload,
   Workflow,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CaptchaFormDialog } from "@/components/monitor/captcha-form-dialog";
 import { NotificationFormDialog } from "@/components/monitor/notification-form-dialog";
-import { UpstreamSyncSettings } from "@/components/settings/upstream-sync-settings";
-import { apiFetch } from "@/lib/api";
+import { apiDownload, apiFetch } from "@/lib/api";
 import { useTriggerRefresh } from "@/lib/refresh-context";
 import type {
   AppVersion,
@@ -45,6 +38,10 @@ import type {
   NotificationChannelType,
   SystemConfig,
   SystemConfigInput,
+  SystemGatewayConfig,
+  WebBackupItem,
+  WebBackupListResponse,
+  WebBackupRestoreResult,
 } from "@/lib/api-types";
 import { decimal, money, relativeTime } from "@/lib/format";
 import {
@@ -56,9 +53,69 @@ import {
 } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { formatNotifyTestError } from "@/lib/notify-test-error";
+import { publishProductTitle } from "@/lib/product-brand";
 
 function num(v: string) {
   return Number(v || 0);
+}
+
+function formatBackupSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes || 0} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let i = 1; i < units.length && value >= 1024; i += 1) {
+    value /= 1024;
+    unit = units[i];
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
+}
+
+const defaultGatewayConfig: SystemGatewayConfig = {
+  tempPauseSeconds: 30,
+  forwardTimeoutSeconds: 600,
+  modelsCacheTTLSeconds: 60,
+  maxFailoverSwitches: 8,
+  routeBatchConcurrency: 8,
+  usageErrorBodyBytes: 32768,
+  usageErrorMsgRunes: 500,
+  usageErrorHeaderValueRunes: 8192,
+  usageErrorHeadersJSONBytes: 65536,
+};
+
+function patchGateway(
+  prev: SystemConfigForm | null,
+  key: keyof SystemGatewayConfig,
+  value: number,
+): SystemConfigForm | null {
+  if (!prev) return prev;
+  return {
+    ...prev,
+    gateway: {
+      ...(prev.gateway ?? defaultGatewayConfig),
+      [key]: value,
+    },
+  };
+}
+
+function createSystemConfigForm(cfg: SystemConfig): SystemConfigForm {
+  return {
+    ...cfg,
+    auth: {
+      ...cfg.auth,
+      passwordReplacement: "",
+      tokenSecretReplacement: "",
+    },
+    proxy: {
+      ...cfg.proxy,
+      passwordReplacement: "",
+    },
+    gateway: { ...defaultGatewayConfig, ...(cfg.gateway ?? {}) },
+  };
+}
+
+function formsEqual(a: SystemConfigForm, b: SystemConfigForm) {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 interface ProxyTestResult {
@@ -88,11 +145,11 @@ export default function SettingsPage() {
   const refresh = useTriggerRefresh();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [form, setForm] = useState<SystemConfigForm | null>(null);
+  const formRef = useRef<SystemConfigForm | null>(null);
+  const formBaselineRef = useRef<SystemConfigForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [configSavedPendingApply, setConfigSavedPendingApply] = useState(false);
-  const [testingProxy, setTestingProxy] = useState(false);
-  const [checkingVersion, setCheckingVersion] = useState(false);
   const [editingNotification, setEditingNotification] =
     useState<NotificationChannel | null>(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -104,28 +161,37 @@ export default function SettingsPage() {
     null,
   );
   const [busyCaptchaID, setBusyCaptchaID] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState("system");
+  const [testingProxy, setTestingProxy] = useState(false);
+  const [checkingVersion, setCheckingVersion] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("runtime");
   const [versionInfo, setVersionInfo] = useState<AppVersion | null>(null);
   const [anonProbe, setAnonProbe] = useState<
     "unknown" | "open" | "protected" | "error"
   >("unknown");
   const [probingAnon, setProbingAnon] = useState(false);
+  const [backups, setBackups] = useState<WebBackupItem[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [restoredMessage, setRestoredMessage] = useState<string | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (query.data?.config) {
-      setForm({
-        ...query.data.config,
-        auth: {
-          ...query.data.config.auth,
-          passwordReplacement: "",
-          tokenSecretReplacement: "",
-        },
-        proxy: {
-          ...query.data.config.proxy,
-          passwordReplacement: "",
-        },
-      });
+    formRef.current = form;
+  }, [form]);
+
+  useEffect(() => {
+    if (!query.data?.config) return;
+
+    const nextForm = createSystemConfigForm(query.data.config);
+    const currentForm = formRef.current;
+    const baseline = formBaselineRef.current;
+    if (currentForm && baseline && !formsEqual(currentForm, baseline)) {
+      return;
     }
+
+    formBaselineRef.current = nextForm;
+    formRef.current = nextForm;
+    setForm(nextForm);
   }, [query.data]);
 
   useEffect(() => {
@@ -156,6 +222,87 @@ export default function SettingsPage() {
     void probeAnonymousAccess();
   }, []);
 
+  async function refreshBackups() {
+    setBackupsLoading(true);
+    try {
+      const result = await apiFetch<WebBackupListResponse>("/settings/backups");
+      setBackups(result.items ?? []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "加载备份列表失败");
+    } finally {
+      setBackupsLoading(false);
+    }
+  }
+
+  async function handleCreateBackup() {
+    setBackupBusy(true);
+    setRestoredMessage(null);
+    try {
+      await apiFetch<WebBackupItem>("/settings/backups", { method: "POST" });
+      toast.success("Web 备份已创建");
+      await refreshBackups();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "创建备份失败");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleDownloadBackup(tag: string) {
+    setBackupBusy(true);
+    try {
+      const blob = await apiDownload(
+        `/settings/backups/${encodeURIComponent(tag)}/download`,
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `routescope-backup-${tag}.zip`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "下载备份失败");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleRestoreBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const ok = await confirm({
+      title: "恢复 Web 备份？",
+      description:
+        "系统会先创建当前数据的安全快照，再校验上传文件并替换数据库与配置。恢复后服务会自动重启。",
+      confirmLabel: "确认恢复",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBackupBusy(true);
+    try {
+      const payload = new FormData();
+      payload.append("backup", file);
+      const result = await apiFetch<WebBackupRestoreResult>(
+        "/settings/backups/restore",
+        { method: "POST", body: payload },
+      );
+      setRestoredMessage(
+        `${result.message} 恢复前安全快照：${result.safety_backup}`,
+      );
+      toast.success("备份已恢复，服务正在重启");
+      await refreshBackups();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "恢复备份失败");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshBackups();
+  }, []);
+
   if (query.loading && !form) {
     return (
       <section className="text-sm text-muted-foreground">加载配置中...</section>
@@ -170,6 +317,7 @@ export default function SettingsPage() {
 
   if (!form) return null;
 
+  const authEnvironmentOverrides = form.auth.environmentOverrides ?? [];
   const recentLogs = notificationLogs.data?.items ?? [];
   const lastSent = recentLogs[0]?.sent_at ?? null;
   const recentFailed = recentLogs.filter((item) => !item.success).length;
@@ -202,9 +350,7 @@ export default function SettingsPage() {
     try {
       const res = await apiFetch<{ ok: boolean; error?: string }>(
         `/notifications/channels/${channel.id}/test`,
-        {
-          method: "POST",
-        },
+        { method: "POST" },
       );
       if (res.ok) {
         toast.success(`已发送测试消息到 ${channel.name}`);
@@ -268,6 +414,7 @@ export default function SettingsPage() {
       !form.auth.passwordReplacement.trim()
     ) {
       toast.warning("已启用鉴权：若是首次开启，请填写管理员密码后再保存")
+      return
     }
     if (!form) return;
 
@@ -298,6 +445,7 @@ export default function SettingsPage() {
           : {}),
       },
       upstream: form.upstream,
+      gateway: form.gateway,
     };
     setSaving(true);
     try {
@@ -305,20 +453,20 @@ export default function SettingsPage() {
         method: "PUT",
         body: JSON.stringify(payload),
       });
-      setForm((prev) =>
-        prev
-          ? {
-              ...prev,
-              auth: {
-                ...prev.auth,
-                passwordReplacement: "",
-                tokenSecretReplacement: "",
-              },
-              proxy: { ...prev.proxy, passwordReplacement: "" },
-            }
-          : prev,
-      );
+      const savedForm: SystemConfigForm = {
+        ...form,
+        auth: {
+          ...form.auth,
+          passwordReplacement: "",
+          tokenSecretReplacement: "",
+        },
+        proxy: { ...form.proxy, passwordReplacement: "" },
+      };
+      formBaselineRef.current = savedForm;
+      formRef.current = savedForm;
+      setForm(savedForm);
       toast.success("已写入配置文件");
+      publishProductTitle(payload.app.title);
       setConfigSavedPendingApply(true);
       query.refetch();
       refresh();
@@ -400,45 +548,68 @@ export default function SettingsPage() {
   }
 
   return (
-    <section className="space-y-4">
-      <header className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-lg font-semibold text-foreground">系统设置</h1>
-          <Badge
-            variant="outline"
-            className="border-border bg-muted/40 text-muted-foreground"
-          >
-            动态配置中心
-          </Badge>
+    <section className="space-y-5">
+      <div className="surface-panel grid divide-y divide-border overflow-hidden sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <SettingsStatus
+          label="访问控制"
+          value={form.auth.enabled ? "鉴权已开启" : "鉴权已关闭"}
+          tone={form.auth.enabled ? "good" : "warning"}
+        />
+        <SettingsStatus
+          label="运行时配置"
+          value={configSavedPendingApply ? "已保存，等待应用" : "配置已同步"}
+          tone={configSavedPendingApply ? "warning" : "neutral"}
+        />
+        <SettingsStatus
+          label="配置文件"
+          value={query.data?.config_path ?? "未返回路径"}
+          mono
+        />
+      </div>
+
+      <Tabs
+        value={settingsTab}
+        onValueChange={setSettingsTab}
+        className="min-w-0 gap-4"
+      >
+        <div className="section-toolbar sticky top-14 z-20 flex-col gap-3 bg-card/95 backdrop-blur sm:static sm:flex-row sm:items-center sm:justify-between sm:bg-card sm:backdrop-blur-none">
+          <TabsList aria-label="系统设置视图">
+            <TabsTrigger value="runtime">运行配置</TabsTrigger>
+            <TabsTrigger value="notification-policy">通知策略</TabsTrigger>
+            <TabsTrigger value="upstream">上游请求</TabsTrigger>
+            <TabsTrigger value="proxy">代理 IP</TabsTrigger>
+            <TabsTrigger value="backup">数据备份</TabsTrigger>
+          </TabsList>
+          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <p
+              className={cn(
+                "text-xs leading-5 sm:text-right",
+                configSavedPendingApply
+                  ? "font-medium text-amber-700"
+                  : "text-muted-foreground",
+              )}
+            >
+              {configSavedPendingApply
+                ? "配置已保存但尚未应用。"
+                : "保存写入配置文件；应用后运行时策略立即更新。"}
+            </p>
+            <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
+              <Button onClick={handleSave} disabled={saving || applying}>
+                {saving ? "保存中..." : "保存"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleApply}
+                disabled={saving || applying}
+              >
+                {applying ? "应用中..." : "应用"}
+              </Button>
+            </div>
+          </div>
         </div>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          这里集中管理鉴权、调度、通知策略、通知渠道和验证码服务。保存只写入配置文件，应用会让鉴权、调度和通知策略立即生效；通知渠道和验证码服务本身是实时写库生效。
-        </p>
-        <p className="text-xs text-muted-foreground">
-          配置文件路径：{query.data?.config_path ?? "—"}
-        </p>
-      </header>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="h-auto w-full justify-start rounded-2xl border border-border bg-muted/40 p-1">
-          <TabsTrigger value="system" className="px-4 py-2">
-            系统设置
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="px-4 py-2">
-            通知渠道
-          </TabsTrigger>
-          <TabsTrigger value="captcha" className="px-4 py-2">
-            验证码服务
-          </TabsTrigger>
-          <TabsTrigger value="upstream-sync" className="px-4 py-2">
-            <Workflow className="size-3.5" />
-            上游动态同步
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="system">
-          <Card className="overflow-hidden border-border shadow-none">
-            <CardContent className="space-y-8 p-4 sm:p-6">
+        <div className="min-w-0">
+          <TabsContent value="runtime" className="mt-0 min-w-0">
+            <div className="space-y-5">
               <SectionCard
                 icon={<MonitorCog className="size-4 text-violet-600" />}
                 title="应用信息"
@@ -547,6 +718,7 @@ export default function SettingsPage() {
                   label="启用登录鉴权"
                   description="关闭后前端将直接进入系统，不显示登录页。"
                   checked={form.auth.enabled}
+                  disabled={authEnvironmentOverrides.includes("enabled")}
                   onCheckedChange={(checked) =>
                     setForm((prev) =>
                       prev
@@ -565,6 +737,11 @@ export default function SettingsPage() {
                     当前鉴权关闭，所有 /api 可匿名访问。仅建议本机调试；对外暴露前请开启鉴权、设置强密码，并保存后点击「应用」。
                   </NoteBox>
                 )}
+                {authEnvironmentOverrides.length > 0 ? (
+                  <NoteBox title="部署环境接管">
+                    当前鉴权字段由环境变量接管：{authEnvironmentOverrides.join(", ")}。修改这些字段请更新部署环境并重建容器；设置页不会把未生效的文件配置当作已应用。
+                  </NoteBox>
+                ) : null}
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <Field
@@ -573,6 +750,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     value={form.auth.username}
+                    disabled={authEnvironmentOverrides.includes("username")}
                     onChange={(e) =>
                       setForm((prev) =>
                         prev
@@ -619,6 +797,7 @@ export default function SettingsPage() {
                     type="password"
                     autoComplete="new-password"
                     value={form.auth.passwordReplacement}
+                    disabled={authEnvironmentOverrides.includes("password")}
                     placeholder={
                       form.auth.passwordConfigured ? "已配置，留空不变" : "输入新密码"
                     }
@@ -649,6 +828,7 @@ export default function SettingsPage() {
                     type="password"
                     autoComplete="new-password"
                     value={form.auth.tokenSecretReplacement}
+                    disabled={authEnvironmentOverrides.includes("tokenSecret")}
                     placeholder={
                       form.auth.tokenSecretConfigured
                         ? "已配置，留空不变"
@@ -851,6 +1031,11 @@ export default function SettingsPage() {
             </SectionCard>
           </div>
 
+          </div>
+        </TabsContent>
+
+        <TabsContent value="notification-policy" className="mt-0 min-w-0">
+          <div className="space-y-5">
           <SectionCard
             icon={<Bell className="size-4 text-amber-600" />}
             title="通知策略"
@@ -1081,6 +1266,11 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
+          </div>
+        </TabsContent>
+
+        <TabsContent value="upstream" className="mt-0 min-w-0">
+          <div className="space-y-5">
           <SectionCard
             icon={<Server className="size-4 text-indigo-600" />}
             title="上游请求"
@@ -1129,6 +1319,163 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
+          <SectionCard
+            icon={<Workflow className="size-4 text-violet-600" />}
+            title="API 转发运行时（可选）"
+            description="控制 API 转发、路由批量操作与调用错误日志截断；不影响上游账单采集。保存后点「应用配置」立即生效。"
+          >
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <Field
+                label="转发超时（秒）"
+                description={`单次上游转发/流式 drain 超时，默认 ${defaultGatewayConfig.forwardTimeoutSeconds}。`}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  value={String(form.gateway?.forwardTimeoutSeconds ?? defaultGatewayConfig.forwardTimeoutSeconds)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "forwardTimeoutSeconds", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="新建组默认冷却（秒）"
+                description={`创建网关组时默认临时暂停时长，默认 ${defaultGatewayConfig.tempPauseSeconds}。`}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  value={String(form.gateway?.tempPauseSeconds ?? defaultGatewayConfig.tempPauseSeconds)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "tempPauseSeconds", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="新建组默认顺延次数"
+                description={`创建组时默认最大 failover 切换次数，默认 ${defaultGatewayConfig.maxFailoverSwitches}。`}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  max={32}
+                  value={String(form.gateway?.maxFailoverSwitches ?? defaultGatewayConfig.maxFailoverSwitches)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "maxFailoverSwitches", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="模型列表缓存 TTL（秒）"
+                description={`公开 /v1/models 缓存时间，默认 ${defaultGatewayConfig.modelsCacheTTLSeconds}。`}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  value={String(form.gateway?.modelsCacheTTLSeconds ?? defaultGatewayConfig.modelsCacheTTLSeconds)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "modelsCacheTTLSeconds", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="路由批量操作并发"
+                description={`测试模型 / 确保密钥 / 同步模型 / 拉源分组并发上限，默认 ${defaultGatewayConfig.routeBatchConcurrency}，最大 64。`}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={64}
+                  value={String(form.gateway?.routeBatchConcurrency ?? defaultGatewayConfig.routeBatchConcurrency)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "routeBatchConcurrency", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="错误体落库上限（字节）"
+                description={`用量错误响应体截断，默认 ${defaultGatewayConfig.usageErrorBodyBytes}。`}
+              >
+                <Input
+                  type="number"
+                  min={1024}
+                  value={String(form.gateway?.usageErrorBodyBytes ?? defaultGatewayConfig.usageErrorBodyBytes)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "usageErrorBodyBytes", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="错误摘要上限（字符）"
+                description={`用量 error_message 截断，默认 ${defaultGatewayConfig.usageErrorMsgRunes}。`}
+              >
+                <Input
+                  type="number"
+                  min={64}
+                  value={String(form.gateway?.usageErrorMsgRunes ?? defaultGatewayConfig.usageErrorMsgRunes)}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "usageErrorMsgRunes", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="单头值上限（字符）"
+                description={`上游响应头单值截断，默认 ${defaultGatewayConfig.usageErrorHeaderValueRunes}。`}
+              >
+                <Input
+                  type="number"
+                  min={256}
+                  value={String(
+                    form.gateway?.usageErrorHeaderValueRunes ??
+                      defaultGatewayConfig.usageErrorHeaderValueRunes,
+                  )}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "usageErrorHeaderValueRunes", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="响应头 JSON 上限（字节）"
+                description={`上游响应头整段 JSON 截断，默认 ${defaultGatewayConfig.usageErrorHeadersJSONBytes}。`}
+              >
+                <Input
+                  type="number"
+                  min={1024}
+                  value={String(
+                    form.gateway?.usageErrorHeadersJSONBytes ??
+                      defaultGatewayConfig.usageErrorHeadersJSONBytes,
+                  )}
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchGateway(prev, "usageErrorHeadersJSONBytes", num(e.target.value)),
+                    )
+                  }
+                />
+              </Field>
+            </div>
+          </SectionCard>
+
+          </div>
+        </TabsContent>
+
+        <TabsContent value="proxy" className="mt-0 min-w-0">
+          <div className="space-y-5">
           <SectionCard
             icon={<Network className="size-4 text-cyan-600" />}
             title="代理 IP"
@@ -1292,6 +1639,11 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
+          </div>
+        </TabsContent>
+
+        <TabsContent value="backup" className="mt-0 min-w-0">
+          <div className="space-y-5">
           <SectionCard
             icon={<HardDrive className="size-4 text-slate-600" />}
             title="数据与备份"
@@ -1383,6 +1735,104 @@ export default function SettingsPage() {
                   <Download className="size-3.5" />
                   下载脱敏配置 JSON
                 </Button>
+              </div>
+            </div>
+
+            <div className="mt-5 border-t border-border pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Web 备份与恢复</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    备份包含上游账号、通知中心、系统设置、API 转发数据和历史记录。下载文件受管理员鉴权保护。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={backupBusy || backupsLoading}
+                    onClick={() => void handleCreateBackup()}
+                  >
+                    <HardDrive className="size-3.5" />
+                    {backupBusy ? "处理中..." : "立即备份"}
+                  </Button>
+                  <input
+                    ref={restoreInputRef}
+                    type="file"
+                    accept=".zip,application/zip"
+                    className="hidden"
+                    onChange={(event) => void handleRestoreBackup(event)}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={backupBusy}
+                    onClick={() => restoreInputRef.current?.click()}
+                  >
+                    <Upload className="size-3.5" />
+                    上传并恢复
+                  </Button>
+                </div>
+              </div>
+              {restoredMessage && (
+                <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {restoredMessage}
+                </p>
+              )}
+              <div className="mt-4 overflow-x-auto rounded-md border border-border">
+                <table className="w-full min-w-[620px] text-xs">
+                  <thead className="bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">快照时间</th>
+                      <th className="px-3 py-2 font-medium">类型</th>
+                      <th className="px-3 py-2 font-medium">大小</th>
+                      <th className="px-3 py-2 font-medium">校验</th>
+                      <th className="px-3 py-2 text-right font-medium">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {backupsLoading && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
+                          加载备份列表...
+                        </td>
+                      </tr>
+                    )}
+                    {!backupsLoading && backups.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">
+                          暂无 Web 快照，点击“立即备份”创建第一份。
+                        </td>
+                      </tr>
+                    )}
+                    {!backupsLoading && backups.map((item) => (
+                      <tr key={item.tag} className="border-t border-border">
+                        <td className="px-3 py-2 font-mono">{item.tag}</td>
+                        <td className="px-3 py-2">{item.driver === "sqlite" ? "SQLite 在线快照" : item.driver}</td>
+                        <td className="px-3 py-2">{formatBackupSize(item.size_bytes)}</td>
+                        <td className={cn("px-3 py-2", item.valid ? "text-emerald-700" : "text-destructive")}>
+                          {item.valid ? "SHA-256 已通过" : item.error || "校验失败"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs"
+                            disabled={backupBusy || !item.valid}
+                            onClick={() => void handleDownloadBackup(item.tag)}
+                          >
+                            <Download className="size-3.5" />
+                            下载
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </SectionCard>
@@ -1519,35 +1969,10 @@ export default function SettingsPage() {
             </p>
           </SectionCard>
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
-            <Button onClick={handleSave} disabled={saving || applying}>
-              {saving ? "保存中..." : "保存"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleApply}
-              disabled={saving || applying}
-            >
-              {applying ? "应用中..." : "应用"}
-            </Button>
-            <span
-              className={cn(
-                "text-xs",
-                configSavedPendingApply
-                  ? "font-medium text-amber-700"
-                  : "text-muted-foreground",
-              )}
-            >
-              {configSavedPendingApply
-                ? "配置已保存但尚未应用，点击应用后才会立即生效。"
-                : "保存写入配置文件，应用让鉴权、调度、通知策略、代理和上游请求配置立即更新。"}
-            </span>
           </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
-        <TabsContent value="notifications">
+        <TabsContent value="notifications" className="mt-0 min-w-0">
           <SectionCard
             icon={<Send className="size-4 text-violet-600" />}
             title="通知渠道"
@@ -1597,13 +2022,13 @@ export default function SettingsPage() {
                   return (
                     <div
                       key={channel.id}
-                      className="rounded-2xl border border-border bg-background/80 p-4"
+                      className="rounded-md border border-border bg-background p-4"
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex min-w-0 items-start gap-3">
                           <div
                             className={cn(
-                              "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl border",
+                              "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md border",
                               channel.enabled
                                 ? "border-violet-200 bg-violet-50 text-violet-700"
                                 : "border-border bg-muted/40 text-muted-foreground",
@@ -1687,7 +2112,7 @@ export default function SettingsPage() {
           </SectionCard>
         </TabsContent>
 
-        <TabsContent value="captcha">
+        <TabsContent value="captcha" className="mt-0 min-w-0">
           <SectionCard
             icon={<KeyRound className="size-4 text-rose-600" />}
             title="验证码服务"
@@ -1730,7 +2155,7 @@ export default function SettingsPage() {
                 {captchas.data.map((item) => (
                   <div
                     key={item.id}
-                    className="rounded-2xl border border-border bg-background/80 p-4"
+                    className="rounded-md border border-border bg-background p-4"
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="space-y-1">
@@ -1827,9 +2252,7 @@ export default function SettingsPage() {
           </SectionCard>
         </TabsContent>
 
-        <TabsContent value="upstream-sync">
-          <UpstreamSyncSettings />
-        </TabsContent>
+        </div>
       </Tabs>
 
       <NotificationFormDialog
@@ -1855,6 +2278,34 @@ export default function SettingsPage() {
   );
 }
 
+function SettingsStatus({
+  label,
+  value,
+  tone = "neutral",
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "good" | "warning";
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0 px-4 py-3 sm:px-4">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <div className="mt-1 flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full bg-muted-foreground",
+            tone === "good" && "bg-emerald-500",
+            tone === "warning" && "bg-amber-500",
+          )}
+        />
+        <p className={cn("truncate text-sm font-medium text-foreground", mono && "font-mono text-xs")}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
 function Field({
   label,
   description,
@@ -1864,17 +2315,29 @@ function Field({
   description?: string;
   children: React.ReactNode;
 }) {
+  const reactId = useId();
+  const controlId = `settings-field-${reactId.replace(/:/g, "")}`;
+  const descriptionId = description ? `${controlId}-description` : undefined;
+  const control = isValidElement(children)
+    ? cloneElement(children as React.ReactElement<Record<string, unknown>>, {
+        id: controlId,
+        "aria-describedby": descriptionId,
+      })
+    : children;
+
   return (
     <div className="space-y-2">
       <div className="space-y-1">
-        <Label className="text-xs font-medium text-foreground">{label}</Label>
+        <Label htmlFor={controlId} className="text-xs font-medium text-foreground">
+          {label}
+        </Label>
         {description ? (
-          <p className="text-[11px] leading-5 text-muted-foreground">
+          <p id={descriptionId} className="text-[11px] leading-5 text-muted-foreground">
             {description}
           </p>
         ) : null}
       </div>
-      {children}
+      {control}
     </div>
   );
 }
@@ -1893,7 +2356,7 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-3xl border border-border/80 bg-muted/20 p-5">
+    <section className="surface-panel p-4 sm:p-5">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -1916,16 +2379,18 @@ function InlineSwitch({
   label,
   description,
   checked,
+  disabled = false,
   onCheckedChange,
 }: {
   id: string;
   label: string;
   description: string;
   checked: boolean;
+  disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-2xl border border-border bg-background/90 px-4 py-3">
+    <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-muted/45 px-4 py-3">
       <div className="space-y-1">
         <Label htmlFor={id} className="text-sm font-medium text-foreground">
           {label}
@@ -1934,7 +2399,7 @@ function InlineSwitch({
           {description}
         </p>
       </div>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </div>
   );
 }
@@ -1947,11 +2412,11 @@ function NoteBox({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+    <div className="rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+      <p className="text-xs font-semibold text-emerald-700">
         {title}
       </p>
-      <p className="mt-1 leading-6">{children}</p>
+      <div className="mt-1 leading-6">{children}</div>
     </div>
   );
 }
@@ -1968,7 +2433,7 @@ function MiniMetric({
   danger?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-background/80 px-4 py-3">
+    <div className="rounded-md border border-border bg-muted/45 px-4 py-3">
       <p className="text-[11px] text-muted-foreground">{title}</p>
       <p
         className={cn(
@@ -1993,7 +2458,7 @@ function EmptyPanel({
   description: string;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border bg-background/70 px-4 py-6">
+    <div className="surface-empty px-4 py-6">
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         {description}

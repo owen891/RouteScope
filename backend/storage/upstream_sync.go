@@ -146,6 +146,12 @@ func (r *UpstreamSyncTargetGroups) FindByTargetAndRemote(targetID uint, remoteGr
 	return &item, nil
 }
 
+func (r *UpstreamSyncTargetGroups) UpdateRatio(targetID uint, remoteGroupID int64, ratio float64, syncedAt time.Time) error {
+	return r.db.Model(&UpstreamSyncTargetGroup{}).
+		Where("target_id = ? AND remote_group_id = ?", targetID, remoteGroupID).
+		Updates(map[string]any{"ratio": ratio, "last_sync_at": syncedAt}).Error
+}
+
 func (r *UpstreamSyncGroups) List() ([]UpstreamSyncGroup, error) {
 	var list []UpstreamSyncGroup
 	if err := r.db.Order("id ASC").Find(&list).Error; err != nil {
@@ -251,6 +257,8 @@ func (r *UpstreamSyncAccounts) SaveForGroup(syncGroupID uint, list []UpstreamSyn
 				if err := tx.Model(&UpstreamSyncAccount{}).Where("id = ?", list[i].ID).Updates(map[string]any{
 					"sync_group_id":      list[i].SyncGroupID,
 					"position":           list[i].Position,
+					"source_mode":        list[i].SourceMode,
+					"target_account_id":  list[i].TargetAccountID,
 					"source_channel_id":  list[i].SourceChannelID,
 					"source_group_id":    list[i].SourceGroupID,
 					"source_group_name":  list[i].SourceGroupName,

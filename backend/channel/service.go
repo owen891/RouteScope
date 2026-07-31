@@ -168,6 +168,93 @@ type CreateInput struct {
 	MonitorEnabled         bool
 }
 
+// TokenValidationResult describes a successful online token credential check.
+// TokenCredential may differ from the input when a Sub2API refresh token was used.
+type TokenValidationResult struct {
+	TokenCredential string
+	Refreshed       bool
+}
+
+// ValidateTokenCredential checks an imported token against its upstream without
+// creating a channel or changing any persisted credential/session state.
+func (s *Service) ValidateTokenCredential(ctx context.Context, in CreateInput) (*TokenValidationResult, error) {
+	mode := in.CredentialMode
+	if mode == "" {
+		mode = storage.CredentialModePassword
+	}
+	if mode != storage.CredentialModeToken {
+		return nil, errors.New("仅 token 模式支持导入前凭据校验")
+	}
+	rawCred, err := selectRawCredential(mode, in.Password, in.TokenCredential)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCredential(in.Type, mode, rawCred); err != nil {
+		return nil, err
+	}
+	loginExtraParams, err := normalizeLoginExtraParams(in.LoginExtraParams)
+	if err != nil {
+		return nil, err
+	}
+	enc, err := s.Cipher.Encrypt(rawCred)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt credential for validation: %w", err)
+	}
+	temporary := &storage.Channel{
+		Name:                   in.Name,
+		Type:                   in.Type,
+		SiteURL:                in.SiteURL,
+		Username:               in.Username,
+		PasswordCipher:         enc,
+		CredentialMode:         mode,
+		LoginExtraParams:       loginExtraParams,
+		ProxyEnabled:           in.ProxyEnabled,
+		RechargeMultiplier:     normalizeRechargeMultiplier(in.RechargeMultiplier),
+		RechargeMultiplierMode: connector.NormalizeRechargeMultiplierMode(in.RechargeMultiplierMode),
+	}
+	resolved, err := s.Resolve(ctx, temporary)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := connector.For(connector.ChannelType(in.Type))
+	if err != nil {
+		return nil, err
+	}
+	s.applyHTTPConfig(conn)
+	applyProxy(conn, resolved)
+	session, err := s.buildSessionFromToken(temporary)
+	if err != nil {
+		return nil, err
+	}
+	if authErr := conn.CheckAuth(ctx, resolved, session); authErr == nil {
+		return &TokenValidationResult{TokenCredential: rawCred}, nil
+	} else if strings.TrimSpace(session.RefreshToken) == "" {
+		return nil, fmt.Errorf("token 在线校验失败：%w", authErr)
+	}
+
+	refreshed, err := refreshSession(ctx, resolved, conn, session)
+	if err != nil {
+		return nil, fmt.Errorf("access_token 已失效且 refresh_token 刷新失败：%w", err)
+	}
+	if err := conn.CheckAuth(ctx, resolved, refreshed); err != nil {
+		return nil, fmt.Errorf("刷新后的 token 在线校验失败：%w", err)
+	}
+	if in.Type != storage.ChannelTypeSub2API {
+		return nil, fmt.Errorf("%s token 模式不支持 refresh_token", in.Type)
+	}
+	refreshedRaw, err := json.Marshal(Sub2APITokenCredential{
+		AccessToken:  strings.TrimSpace(refreshed.AccessToken),
+		RefreshToken: strings.TrimSpace(refreshed.RefreshToken),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal refreshed token credential: %w", err)
+	}
+	return &TokenValidationResult{
+		TokenCredential: string(refreshedRaw),
+		Refreshed:       true,
+	}, nil
+}
+
 func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 	mode := in.CredentialMode
 	if mode == "" {
@@ -237,6 +324,12 @@ type UpdateInput struct {
 	RechargeMultiplier     *float64
 	RechargeMultiplierMode *string
 	MonitorEnabled         *bool
+}
+
+// SetFavorite updates only the channel favorite flag so a star toggle cannot
+// accidentally overwrite credentials or other operational settings.
+func (s *Service) SetFavorite(id uint, favorite bool) (*storage.Channel, error) {
+	return s.Channels.SetFavorite(id, favorite)
 }
 
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
@@ -456,7 +549,6 @@ func validateCredential(channelType storage.ChannelType, mode storage.Credential
 }
 
 func (s *Service) Delete(id uint) error {
-	_ = s.AuthSessions.Delete(id)
 	return s.Channels.Delete(id)
 }
 
@@ -1098,6 +1190,41 @@ func (s *Service) GetSubscriptionUsage(ctx context.Context, channelID uint) (*co
 	}
 	_ = s.Channels.SetLastError(c.ID, "")
 	return info, nil
+}
+
+// GetModelPrices 读取当前账号在上游可见的模型价目。
+func (s *Service) GetModelPrices(ctx context.Context, channelID uint) ([]connector.ModelPriceResult, error) {
+	c, resolved, conn, session, err := s.prepareConnectorCall(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	provider, ok := conn.(connector.ModelPriceProvider)
+	if !ok {
+		return nil, fmt.Errorf("%s 暂不支持读取上游模型价目", c.Type)
+	}
+	items, err := provider.GetModelPrices(ctx, resolved, session)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// GetUsageAnalytics 读取指定上游渠道的真实消费统计。
+func (s *Service) GetUsageAnalytics(ctx context.Context, channelID uint, query connector.UsageAnalyticsQuery) (*connector.UsageAnalytics, error) {
+	c, resolved, conn, session, err := s.prepareConnectorCall(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	provider, ok := conn.(connector.UsageAnalyticsProvider)
+	if !ok {
+		return nil, fmt.Errorf("%s connector 不支持真实消费统计", c.Type)
+	}
+	analytics, err := provider.GetUsageAnalytics(ctx, resolved, session, query)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.Channels.SetLastError(c.ID, "")
+	return analytics, nil
 }
 
 func (s *Service) ListAPIKeys(ctx context.Context, channelID uint, query connector.APIKeyQuery) (*connector.APIKeyPage, error) {

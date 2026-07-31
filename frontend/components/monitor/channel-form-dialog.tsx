@@ -314,70 +314,76 @@ export function ChannelFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="flex min-h-0 max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-12">
           <DialogTitle>{isEdit ? "编辑渠道" : "新增渠道"}</DialogTitle>
           <DialogDescription>
-            {isEdit ? "修改后会清空已缓存的登录会话。" : "添加上游账号，开启监控后将按计划自动登录。"}
+            {isEdit ? "修改连接、凭据和监控策略。保存后会清空登录会话。" : "配置上游连接、登录凭据和监控策略。"}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_120px]">
-            <div className="space-y-1.5">
-              <Label htmlFor="name">渠道名</Label>
-              <Input
-                id="name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-                disabled={submitting}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="sort-order">排序</Label>
-              <Input
-                id="sort-order"
-                type="number"
-                step="1"
-                value={form.sort_order}
-                onChange={(e) => setForm({ ...form, sort_order: e.target.value })}
-                disabled={submitting}
-              />
-            </div>
-          </div>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-5">
+            <section className="space-y-3" aria-labelledby="channel-connection-heading">
+              <h3 id="channel-connection-heading" className="text-sm font-semibold text-foreground">连接信息</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="name">渠道名</Label>
+                  <Input
+                    id="name"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="sort-order">排序</Label>
+                  <Input
+                    id="sort-order"
+                    type="number"
+                    step="1"
+                    value={form.sort_order}
+                    onChange={(e) => setForm({ ...form, sort_order: e.target.value })}
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="type">类型</Label>
-            <Select
-              value={form.type}
-              onValueChange={(v) => setForm({ ...form, type: v as ChannelType })}
-              disabled={isEdit || submitting}
-            >
-              <SelectTrigger id="type" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sub2api">Sub2API</SelectItem>
-                <SelectItem value="newapi">NewAPI</SelectItem>
-              </SelectContent>
-            </Select>
-            {isEdit ? (
-              <p className="text-[11px] text-muted-foreground">类型创建后不可修改</p>
-            ) : null}
-          </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="type">类型</Label>
+                  <Select
+                    value={form.type}
+                    onValueChange={(v) => setForm({ ...form, type: v as ChannelType })}
+                    disabled={isEdit || submitting}
+                  >
+                    <SelectTrigger id="type" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sub2api">Sub2API</SelectItem>
+                      <SelectItem value="newapi">NewAPI</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="site_url">站点地址</Label>
-            <Input
-              id="site_url"
-              placeholder="https://example.com"
-              value={form.site_url}
-              onChange={(e) => setForm({ ...form, site_url: e.target.value })}
-              required
-              disabled={submitting}
-            />
-          </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="site_url">站点地址</Label>
+                  <Input
+                    id="site_url"
+                    placeholder="https://example.com"
+                    value={form.site_url}
+                    onChange={(e) => setForm({ ...form, site_url: e.target.value })}
+                    required
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-3 border-t border-border pt-5" aria-labelledby="channel-credential-heading">
+              <h3 id="channel-credential-heading" className="text-sm font-semibold text-foreground">登录凭据</h3>
 
           {/* 凭据类型 toggle */}
           <div className="space-y-1.5">
@@ -411,9 +417,7 @@ export function ChannelFormDialog({
               </button>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              {isTokenMode
-                ? "粘贴浏览器里已登录后的 Token / Cookie。失效时需要手动重新粘贴。"
-                : "提供账号密码，系统自动登录并续期。可能需要配打码 provider。"}
+              {isTokenMode ? "直接使用已有 Token，不执行自动登录。" : "使用账号密码自动登录并续期。"}
             </p>
           </div>
 
@@ -460,9 +464,6 @@ export function ChannelFormDialog({
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                   disabled={submitting}
                 />
-                <p className="text-[11px] text-muted-foreground">
-                  仅作展示，不参与鉴权
-                </p>
               </div>
 
               {form.type === "newapi" ? (
@@ -497,11 +498,6 @@ export function ChannelFormDialog({
                         系统访问令牌
                       </button>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      {form.newapi_token_kind === "access_token"
-                        ? "对应 NewAPI 个人设置页生成的「系统访问令牌」(user.access_token)，请求走 Authorization 头。"
-                        : "浏览器登录后的整段 Cookie，典型形如 session=MTc4...; ..."}
-                    </p>
                   </div>
 
                   {form.newapi_token_kind === "cookie" ? (
@@ -612,25 +608,29 @@ export function ChannelFormDialog({
           ) : null}
 
           {!isTokenMode ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="login-extra-params">附加表单参数</Label>
-              <Textarea
-                id="login-extra-params"
-                placeholder='{"device_id":"xxx"}'
-                value={form.login_extra_params}
-                onChange={(e) => setForm({ ...form, login_extra_params: e.target.value })}
-                rows={3}
-                className="field-sizing-fixed text-xs font-mono"
-                disabled={submitting}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                用于非标准 Sub2API / NewAPI 魔改版增加的登录参数字段。
-              </p>
-            </div>
+            <details className="rounded-md border border-border">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground">高级登录参数 <span className="font-normal text-muted-foreground">可选 JSON</span></summary>
+              <div className="space-y-1.5 border-t border-border p-3">
+                <Label htmlFor="login-extra-params" className="sr-only">附加表单参数</Label>
+                <Textarea
+                  id="login-extra-params"
+                  placeholder='{"device_id":"xxx"}'
+                  value={form.login_extra_params}
+                  onChange={(e) => setForm({ ...form, login_extra_params: e.target.value })}
+                  rows={2}
+                  className="field-sizing-fixed text-xs font-mono"
+                  disabled={submitting}
+                />
+              </div>
+            </details>
           ) : null}
+            </section>
+
+            <section className="space-y-3 border-t border-border pt-5" aria-labelledby="channel-policy-heading">
+              <h3 id="channel-policy-heading" className="text-sm font-semibold text-foreground">监控与计费</h3>
 
           <div className="space-y-1.5">
-            <Label htmlFor="threshold">余额阈值（低于此值发告警，0 = 不告警）</Label>
+            <Label htmlFor="threshold">余额告警阈值</Label>
             <Input
               id="threshold"
               type="number"
@@ -638,13 +638,14 @@ export function ChannelFormDialog({
               min="0"
               value={form.balance_threshold}
               onChange={(e) => setForm({ ...form, balance_threshold: e.target.value })}
+              placeholder="0 = 不告警"
               disabled={submitting}
             />
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="recharge-multiplier">充值倍率（留空 = 跟随上游）</Label>
+              <Label htmlFor="recharge-multiplier">充值倍率</Label>
               <Input
                 id="recharge-multiplier"
                 type="number"
@@ -652,6 +653,7 @@ export function ChannelFormDialog({
                 min="0"
                 value={form.recharge_multiplier}
                 onChange={(e) => setForm({ ...form, recharge_multiplier: e.target.value })}
+                placeholder="留空跟随上游"
                 disabled={submitting}
               />
             </div>
@@ -675,7 +677,8 @@ export function ChannelFormDialog({
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="flex min-h-12 items-center justify-between rounded-md border border-border px-3 py-2">
             <div>
               <p className="text-sm font-medium">启用监控</p>
               <p className="text-xs text-muted-foreground">关闭后调度器不会扫描此渠道</p>
@@ -687,7 +690,7 @@ export function ChannelFormDialog({
             />
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+          <div className="flex min-h-12 items-center justify-between rounded-md border border-border px-3 py-2">
             <div>
               <p className="text-sm font-medium">忽略公告</p>
               <p className="text-xs text-muted-foreground">开启后不会拉取该渠道公告</p>
@@ -700,7 +703,7 @@ export function ChannelFormDialog({
           </div>
 
           {supportsSubscription ? (
-            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+            <div className="flex min-h-12 items-center justify-between rounded-md border border-border px-3 py-2">
               <div>
                 <p className="text-sm font-medium">启用订阅购买</p>
                 <p className="text-xs text-muted-foreground">开启后充值弹窗显示订阅购买</p>
@@ -713,7 +716,7 @@ export function ChannelFormDialog({
             </div>
           ) : null}
 
-          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+          <div className="flex min-h-12 items-center justify-between rounded-md border border-border px-3 py-2">
             <div>
               <p className="text-sm font-medium">启用代理 IP</p>
               <p className="text-xs text-muted-foreground">全局代理启用后，该渠道上游请求走系统代理配置</p>
@@ -728,7 +731,7 @@ export function ChannelFormDialog({
           {/* Turnstile / 打码：token 模式下整段不展示 */}
           {!isTokenMode ? (
             <>
-              <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+               <div className="flex min-h-12 items-center justify-between rounded-md border border-border px-3 py-2">
                 <div>
                   <p className="text-sm font-medium">Turnstile 人机校验</p>
                   <p className="text-xs text-muted-foreground">站点开启 Cloudflare Turnstile 时打开</p>
@@ -741,7 +744,7 @@ export function ChannelFormDialog({
               </div>
 
               {form.turnstile_enabled ? (
-                <div className="space-y-1.5">
+                 <div className="space-y-1.5 sm:col-span-2">
                   <Label htmlFor="captcha-config">打码 provider</Label>
                   <Select
                     value={form.captcha_config_id}
@@ -753,7 +756,7 @@ export function ChannelFormDialog({
                         placeholder={
                           captchas.data && captchas.data.length > 0
                             ? "选择 provider"
-                            : "先到底部 [验证码服务] 卡片新增"
+                            : "请先在 Captcha 页面新增"
                         }
                       />
                     </SelectTrigger>
@@ -767,13 +770,13 @@ export function ChannelFormDialog({
                         ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    {"siteKey 会自动从上游公开接口拉取，无需在此填写。"}
-                  </p>
                 </div>
               ) : null}
             </>
           ) : null}
+          </div>
+
+            </section>
 
           {error ? (
             <p className="text-sm text-destructive" role="alert">
@@ -781,7 +784,9 @@ export function ChannelFormDialog({
             </p>
           ) : null}
 
-          <DialogFooter>
+          </div>
+
+          <DialogFooter className="shrink-0 border-t border-border px-4 py-3 sm:px-5">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
               取消
             </Button>

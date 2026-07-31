@@ -7,14 +7,14 @@ services:
       TZ: Asia/Shanghai
       MYSQL_DATABASE: ${MYSQL_DATABASE:-upstreamops}
       MYSQL_USER: ${MYSQL_USER:-upstreamops}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change-me}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required for MySQL Compose}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required for MySQL Compose}
     ports:
       - "${MYSQL_PORT:-33069}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MYSQL_USER:-upstreamops} -p${MYSQL_PASSWORD:-change-me}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MYSQL_USER:-upstreamops} -p${MYSQL_PASSWORD:?MYSQL_PASSWORD is required for MySQL Compose}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -29,7 +29,7 @@ services:
       DATABASE_HOST: mysql
       DATABASE_PORT: 3306
       DATABASE_USER: ${MYSQL_USER:-upstreamops}
-      DATABASE_PASSWORD: ${MYSQL_PASSWORD:-change-me}
+      DATABASE_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required for MySQL Compose}
       DATABASE_NAME: ${MYSQL_DATABASE:-upstreamops}
 
 volumes:

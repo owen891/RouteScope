@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/bejix/upstream-ops/backend/global"
@@ -29,27 +28,9 @@ func TestIsVersionNewer(t *testing.T) {
 	}
 }
 
-func TestVersionEndpointReportsUpdate(t *testing.T) {
+func TestVersionEndpointReportsLocalReleaseMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	withGitHubReleaseServer(t, http.StatusOK, `{"tag_name":"v999.0.0","html_url":"https://github.com/bejix/upstream-ops/releases/tag/v999.0.0"}`)
-	resp := requestVersion(t)
-
-	if !resp.UpdateAvailable {
-		t.Fatalf("update_available = false, want true")
-	}
-	if resp.LatestVersion != "v999.0.0" {
-		t.Fatalf("latest_version = %q, want v999.0.0", resp.LatestVersion)
-	}
-	if resp.ReleaseURL == "" {
-		t.Fatalf("release_url is empty")
-	}
-}
-
-func TestVersionEndpointReportsNoUpdate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	withGitHubReleaseServer(t, http.StatusOK, `{"tag_name":"`+global.VERSION+`","html_url":"https://github.com/bejix/upstream-ops/releases/tag/v`+global.VERSION+`"}`)
 	resp := requestVersion(t)
 
 	if resp.UpdateAvailable {
@@ -58,42 +39,12 @@ func TestVersionEndpointReportsNoUpdate(t *testing.T) {
 	if resp.LatestVersion != global.VERSION {
 		t.Fatalf("latest_version = %q, want %s", resp.LatestVersion, global.VERSION)
 	}
-}
-
-func TestVersionEndpointKeepsResponseOnGitHubError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	withGitHubReleaseServer(t, http.StatusInternalServerError, `{"message":"error"}`)
-	resp := requestVersion(t)
-
-	if resp.UpdateAvailable {
-		t.Fatalf("update_available = true, want false")
+	if resp.ReleaseURL != githubRepoURL {
+		t.Fatalf("release_url = %q, want %q", resp.ReleaseURL, githubRepoURL)
 	}
-	if strings.TrimSpace(resp.UpdateError) == "" {
-		t.Fatalf("update_error is empty")
+	if resp.RepoURL != githubRepoURL {
+		t.Fatalf("repo_url = %q, want %q", resp.RepoURL, githubRepoURL)
 	}
-	if resp.Version != global.VERSION {
-		t.Fatalf("version = %q, want %s", resp.Version, global.VERSION)
-	}
-}
-
-func withGitHubReleaseServer(t *testing.T, status int, body string) {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(srv.Close)
-
-	oldURL := githubLatestReleaseURL
-	oldClient := githubReleaseClient
-	githubLatestReleaseURL = srv.URL
-	githubReleaseClient = srv.Client()
-	t.Cleanup(func() {
-		githubLatestReleaseURL = oldURL
-		githubReleaseClient = oldClient
-	})
 }
 
 func requestVersion(t *testing.T) versionResponse {

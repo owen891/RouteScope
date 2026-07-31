@@ -143,11 +143,25 @@ func TestAdminClientUsesAPIKeyAndDecodesAccountWrites(t *testing.T) {
 		_, _ = w.Write([]byte("data: {\"type\":\"content\",\"text\":\"pong\"}\n\n"))
 		_, _ = w.Write([]byte("data: {\"type\":\"test_complete\",\"success\":true}\n\n"))
 	})
+	groupRatio := 0.06
 	mux.HandleFunc("/api/v1/admin/groups/1", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-api-key") != "admin-key" {
 			t.Fatalf("x-api-key = %q", r.Header.Get("x-api-key"))
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{}})
+		if r.Method == http.MethodPut {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode group update: %v", err)
+			}
+			if len(body) != 1 || body["rate_multiplier"] != 0.08 {
+				t.Fatalf("group update body = %#v", body)
+			}
+			groupRatio = 0.08
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{"id": 1, "name": "default", "rate_multiplier": groupRatio, "status": "active"},
+		})
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -160,6 +174,14 @@ func TestAdminClientUsesAPIKeyAndDecodesAccountWrites(t *testing.T) {
 	}
 	if len(groups) != 1 || groups[0].ID != 1 || groups[0].Ratio != 0.06 {
 		t.Fatalf("groups = %#v", groups)
+	}
+	group, err := client.GetGroup(context.Background(), target, 1)
+	if err != nil || group.Name != "default" || group.Ratio != 0.06 {
+		t.Fatalf("GetGroup = %#v, err=%v", group, err)
+	}
+	group, uncertain, err := client.UpdateGroupRatio(context.Background(), target, 1, 0.08)
+	if err != nil || uncertain || group.Ratio != 0.08 {
+		t.Fatalf("UpdateGroupRatio = %#v, uncertain=%v err=%v", group, uncertain, err)
 	}
 	proxies, err := client.ListProxies(context.Background(), target)
 	if err != nil {

@@ -12,7 +12,7 @@ export interface AllApiHubImportOptions {
   nameConflict?: NameConflictPolicy
   /** Prefer notes-derived password when token is expired/missing (default true). */
   allowNotesPassword?: boolean
-  /** Still import expired access tokens when nothing better exists (default true). */
+  /** Still import expired access tokens when nothing better exists (default false). */
   allowExpiredToken?: boolean
   /** Sort order base; each row gets base + index (default 1). */
   sortOrderBase?: number
@@ -110,6 +110,15 @@ export interface ParseBackupResult {
   accountCount: number
   rows: ImportPreviewRow[]
   parseError?: string
+}
+
+/** Whether an import row should be checked against the upstream before writing. */
+export function shouldValidateImportedToken(
+  row: ImportPreviewRow,
+  allowExpiredToken: boolean,
+): boolean {
+  if (row.payload?.credential_mode !== "token") return false
+  return !(allowExpiredToken && row.warnings.includes("expired_token"))
 }
 
 function asStr(v: unknown): string {
@@ -248,7 +257,7 @@ export function mapAccountToPreview(
   nowSec: number = Date.now() / 1000,
 ): ImportPreviewRow {
   const allowNotesPassword = options.allowNotesPassword !== false
-  const allowExpiredToken = options.allowExpiredToken !== false
+  const allowExpiredToken = options.allowExpiredToken === true
   const nameConflict = options.nameConflict ?? "rename"
   const sortBase = options.sortOrderBase ?? 1
 

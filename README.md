@@ -1,808 +1,223 @@
-# UpstreamOps
+# RouteScope
 
-[English](README.md) | [简体中文](README.zh.md)
+[中文说明](README.zh.md) | [Repository](https://github.com/owen891/RouteScope)
 
-> UpstreamOps is a centralized monitoring and operations dashboard for NewAPI and Sub2API upstream sites. It helps manage upstream accounts, balances, spending, model or group rates, Sub2API upstream synchronization, rate changes, upstream API keys, recharge and redeem workflows, subscriptions, announcements, and notification alerts.
+> RouteScope is a self-hosted operations console for monitoring upstream channels, comparing rates and costs, synchronizing Sub2API accounts, and serving a controlled API relay from one workspace.
 
-UpstreamOps is not a model proxy or request forwarding gateway. It is an operations console for maintaining multiple upstream admin panels from one place.
+**Current version: v0.1.0**
 
-> This project is based on [worryzyy/upstream-hub](https://github.com/worryzyy/upstream-hub). Thanks to [@worryzyy](https://github.com/worryzyy) for the original open-source work.
+RouteScope is built for a single trusted operator. It brings upstream status, operational history, routing configuration, notifications, and runtime settings into one local control plane. The primary deployment is Docker Compose with SQLite and a persistent <code>./data</code> directory.
 
-## Sponsor
+## What It Does
 
-<details open>
-<summary>Click to expand</summary>
-
-<table>
-<tr>
-<td width="180"><a href="https://cmzi.com/aff/CHTVTQWE"><img src="https://zhenxiansheng-1251032746.file.myqcloud.com/Markdown/2020/12/29/zi-yuan-32.png" alt="cmzi.com" width="150"></a></td>
-<td>Thanks to 触摸云 for sponsoring this project. 触摸云 provides overseas cloud computing services, including Hong Kong cloud servers, US high-defense servers, physical servers, protection services, acceleration CDN, and self-developed CDN systems. UpstreamOps users can use <a href="https://cmzi.com/aff/CHTVTQWE">this link</a>.</td>
-</tr>
-</table>
-
-</details>
-
-## Why Use UpstreamOps
-
-When you maintain multiple NewAPI or Sub2API upstream accounts, balance, spending, rates, announcements, API keys, subscriptions, recharge entry points, and downstream synchronization are usually scattered across different admin panels. Manually logging in one by one is repetitive and can easily miss low balances, rate changes, login failures, expiring subscriptions, or upstream announcements.
-
-UpstreamOps focuses on these problems:
-
-- Centralized status view: balances, spending, rates, announcements, subscriptions, and abnormal states across multiple upstreams.
-- Less manual checking: scheduled balance, spending, rate, and subscription usage synchronization.
-- Faster risk detection: low balances, rate changes, login failures, monitor failures, low subscription quota, and expiring subscriptions can be pushed through notifications.
-- Historical tracking: rate changes, balance snapshots, notification logs, and upstream announcements are stored locally.
-- Easier operations: API key management, recharge, redeem, subscription purchase, renewal, and Sub2API upstream synchronization are available from one entry point.
-- Complex network support: global proxy support with per-upstream, per-notification-channel, and per-captcha-provider proxy switches.
-
-## Preview
-
-![UpstreamOps preview 1](docs/images/demo1.png)
-
-![UpstreamOps preview 2](docs/images/demo2.png)
-
-![UpstreamOps preview 3](docs/images/demo3.png)
-
-![UpstreamOps preview 4](docs/images/demo4.png)
-
-![UpstreamOps preview 5](docs/images/demo5.png)
-
-![UpstreamOps preview 6](docs/images/demo6.png)
-
-![UpstreamOps preview 7](docs/images/demo7.png)
-
-## Features
-
-### Upstream Channel Management
-
-- Supports NewAPI and Sub2API upstreams.
-- Supports username/password credentials and token/cookie credentials.
-- Enables or disables monitoring per channel.
-- Supports custom channel sort order; higher values are displayed and monitored first.
-- Configures low-balance alert thresholds.
-- Tests login and manually syncs balances and rates.
-- Supports extra login form parameters for modified NewAPI or Sub2API login endpoints.
-- Supports Cloudflare Turnstile solving for upstream login flows.
-- Opens upstream site URLs directly from channel cards.
-- Supports clearing saved login information from channel cards.
-- Deleting a channel cleans related snapshots, rates, announcements, notification cooldowns, and notification logs.
-
-### Sub2API Upstream Synchronization
-
-- Adds an **Upstream Sync** tab to system settings for managing writable Sub2API target upstreams.
-- Stores target addresses and encrypted Admin API Keys, checks connectivity, synchronizes target groups, and queries proxy lists.
-- Manages local synchronization groups and accounts by source channel, source group, target group, proxy, concurrency, weight, rate conversion, model limits, pool mode, and custom error codes.
-- Supports upstream model synchronization and custom model lists. Source models can be queried before applying a synchronization group.
-- Supports account testing with a selected model; failed tests disable scheduling for that target account.
-- Supports name templates with `{同步分组ID}`, `{渠道ID}`, and `{源分组ID}` placeholders.
-- Supports manual apply, managed-object deletion, and paginated execution logs.
-- Enabled synchronization groups are reapplied after scheduled rate scans.
-- Synchronization group changes and apply results can trigger `upstream_sync_group_changed` notifications.
-
-### Balance and Spending Monitoring
-
-- Shows total balance, today spending, total spending, lowest-balance channel, and abnormal channel count.
-- Periodically collects balance and spending data.
-- Displays balance history trends.
-- Pushes notifications when balance falls below the configured threshold.
-- Supports cooldown for repeated low-balance alerts.
-- Supports recharge multiplier conversion for balance, spending, and redeem values, using either the upstream multiplier or a manual divide/multiply mode.
-
-### Rate Monitoring
-
-- Syncs upstream model or group rates.
-- Stores current rate snapshots.
-- Records rate change history.
-- Supports paginated rate change history and channel filters.
-- Sends rate change notifications.
-- Merges multiple rate changes from the same scan into one notification.
-- Merges added and removed groups in the same scan into one structure-change notification.
-- Filters small rate changes by minimum percentage.
-- Supports notification subscriptions filtered by upstream channel and rate group.
-- Provides a full channel group overview with search and sorting by channel or rate.
-
-### Subscription Management and Usage Monitoring
-
-For Sub2API upstream channels, UpstreamOps provides subscription lifecycle management and usage monitoring:
-
-- Queries upstream subscription plans and payment methods.
-- Purchases or renews subscriptions.
-- Supports QR code, redirect URL, and form-submit payment launch modes.
-- Queries daily, weekly, and monthly quota limits, used amount, remaining amount, and remaining percentage.
-- Shows subscription expiration time, remaining days, and status.
-- Sends low remaining-quota alerts for daily, weekly, and monthly windows.
-- Sends expiring-subscription alerts.
-- Supports cooldown for repeated subscription alerts.
-- Provides summary cards and detail dialogs in the frontend.
-
-### Captcha Provider Balance Management
-
-- Supports CapSolver, 2Captcha, AntiCaptcha, and YesCaptcha.
-- Queries captcha provider account balances.
-- Refreshes one provider balance manually.
-- Refreshes all provider balances in batch.
-- Shows balance value, balance unit, refresh time, and error message.
-
-### Global Proxy and Upstream HTTP Settings
-
-- Supports HTTP, HTTPS, and SOCKS5 proxies.
-- Supports proxy username and password.
-- Allows upstream channels, notification channels, and captcha providers to opt in separately.
-- Allows version checks to use the proxy separately.
-- Configures upstream request timeout and `User-Agent`.
-- Provides proxy connectivity testing in the system settings page.
-
-### Upstream Announcements
-
-- Syncs NewAPI announcements from `/api/status` and `/api/notice`.
-- Syncs Sub2API user-visible announcements from `/api/v1/announcements`.
-- Announcement sync runs with rate sync and does not require a separate cron task.
-- The first sync only creates a baseline and does not push historical announcements.
-- New announcements are stored locally and pushed through notification channels.
-- Shows recent announcements on the dashboard.
-- Supports paginated announcement queries and detail views.
-- Renders announcement details as Markdown.
-- Cleans up related announcements when an upstream channel is deleted.
-- Supports retention-based announcement cleanup.
-- Supports channel-level `ignore_announcements`.
-
-### Notification Channels
-
-Supported notification channels:
-
-- Telegram
-- Webhook
-- Email
-- WeCom
-- DingTalk
-- Feishu
-- ServerChan3
-
-Notification channels support subscription filters:
-
-- Empty or `[]`: receive all events.
-- `mode=all`: receive all events from selected upstreams.
-- `mode=groups`: receive only selected rate groups for rate-related events. Announcement, balance, login failure, and monitor failure events are still filtered by upstream channel.
-
-### Upstream API Key Management
-
-From each channel card, you can manage upstream API keys:
-
-- List API keys.
-- Search by name or key.
-- Filter by status.
-- Create API keys.
-- Edit name, group, status, quota, expiration time, IP allowlist or blocklist, model restrictions, and related fields.
-- Delete API keys.
-- Reveal and copy full keys.
-
-Available fields depend on the upstream type and its API capability.
-
-### Recharge and Redeem
-
-From each channel card, you can handle upstream recharge and redeem workflows:
-
-- Query upstream recharge configuration.
-- Supports upstream-provided payment methods such as Alipay and WeChat Pay.
-- Supports QR code, redirect URL, and form-submit payment launch modes.
-- Prefers QR code on desktop and redirect on mobile.
-- Redeems redeem codes online.
-- Shows returned balance, concurrency, group subscription, validity period, and related results.
-- Sub2API channels additionally support subscription purchase and renewal.
-
-### System Settings
-
-The system settings page manages:
-
-- Admin login authentication.
-- Admin username and password.
-- Token signing secret.
-- Balance sync cron.
-- Rate sync cron.
-- Scheduler concurrency.
-- Monitor log, balance snapshot, notification log, and announcement retention.
-- Rate change notification merge policy.
-- Minimum rate change percentage for notifications.
-- Low-balance alert cooldown.
-- Daily, weekly, and monthly subscription remaining percentage thresholds.
-- Subscription expiration threshold.
-- Subscription alert cooldown.
-- Maximum notification retry attempts.
-- Global proxy configuration.
-- Proxy connectivity test.
-- Version check result notification.
-- Upstream request timeout and `User-Agent`.
-- Sub2API upstream synchronization targets and groups.
-- Notification channels.
-- Captcha providers.
-
-Saving writes the configuration file. Applying settings hot-reloads authentication, scheduler, notification policy, proxy, and upstream HTTP settings. Notification channels and captcha providers take effect immediately after database writes.
+- **Overview**: summarizes channel health, balances, costs, recent collection facts, and operational risks.
+- **Channels and accounts**: manages NewAPI and Sub2API channels, credentials, monitoring state, favorites, API keys, recharge, redeem, and account checks.
+- **Activity**: brings alerts, upstream announcements, collection facts, and health probes into one timeline.
+- **Group rates**: compares each upstream group's current rate and rate-change history.
+- **Upstream sync**: synchronizes selected channel accounts to Sub2API targets with groups, proxies, model limits, rate conversion, execution logs, and controlled remote actions.
+- **API relay**: exposes a unified <code>/v1</code> gateway with model mapping, weighted routing, protocol conversion, failover, access keys, direct providers, and usage records.
+- **Actual costs**: shows upstream request usage, token counts, latency, and cost estimates from collected data and relay traffic.
+- **Notification center**: configures notification channels, subscriptions, cooldowns, retry behavior, and delivery history.
+- **System settings**: controls admin authentication, proxy, schedules, retention, backup checks, Captcha providers, version checks, and hot-reloadable runtime settings.
 
 ## Quick Start
 
-For the release, upgrade, backup, rollback, and candidate verification procedure, see [`docs/RELEASE.md`](docs/RELEASE.md).
-
 ### Docker Compose with SQLite
 
-SQLite is the default deployment mode.
+1. Create the local environment file:
 
-```bash
-cp .env.example .env
-```
+   ~~~bash
+   cp .env.example .env
+   ~~~
 
-Edit `.env` and set at least:
+2. Set a stable application secret and enable admin login in <code>.env</code>:
 
-```env
-APP_SECRET=replace-with-a-random-string-at-least-32-bytes
-```
+   ~~~env
+   APP_SECRET=replace-with-a-random-string-at-least-32-bytes
+   AUTH_ENABLED=true
+   ADMIN_USERNAME=admin
+   ADMIN_PASSWORD=replace-with-a-strong-password
+   ~~~
 
-`APP_SECRET` is used to encrypt sensitive fields with AES-GCM, including upstream passwords, tokens, cookies, notification channel secrets, and captcha provider API keys. If you change it later, existing encrypted data cannot be decrypted.
+3. Start RouteScope:
 
-For public access, enable admin login:
+   ~~~bash
+   docker compose up -d
+   ~~~
 
-```env
-AUTH_ENABLED=true
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=replace-with-a-strong-password
-```
+4. Open <code>http://localhost:8080</code> and sign in with the configured admin account.
 
-Docker pulls `ghcr.io/bejix/upstream-ops:${IMAGE_TAG:-latest}` by default. Configuration and data are stored in the host `data/` directory.
+The image is pulled from <code>ghcr.io/owen891/routescope</code>. Change the host port with <code>HTTP_PORT</code>. SQLite data and runtime configuration are stored under <code>./data</code>:
 
-Start:
+~~~text
+data/upstream-ops.db
+data/config.yaml
+~~~
 
-```bash
-docker compose up -d
-```
+Pin a release instead of using <code>latest</code>:
 
-Default URL:
+~~~env
+IMAGE_TAG=v0.1.0
+~~~
 
-```text
-http://localhost:8080
-```
+### Optional MySQL
 
-Default database file inside the container:
+Use the MySQL overlay when required:
 
-```text
-/app/data/upstream-ops.db
-```
-
-The host file is `data/upstream-ops.db`. Runtime system settings are persisted to `data/config.yaml`.
-
-### Pin the Image Version
-
-The default image tag comes from `.env`:
-
-```env
-IMAGE_TAG=latest
-```
-
-For production, pin a specific version:
-
-```env
-IMAGE_TAG=v0.0.6
-```
-
-## MySQL Deployment
-
-Use the MySQL compose file together with the base compose file:
-
-```bash
+~~~bash
 docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d
-```
+~~~
 
-Required `.env` values:
+Set <code>APP_SECRET</code>, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code>, and <code>MYSQL_ROOT_PASSWORD</code> in <code>.env</code> before starting the stack.
 
-```env
-APP_SECRET=replace-with-a-random-string-at-least-32-bytes
-MYSQL_DATABASE=upstreamops
-MYSQL_USER=upstreamops
-MYSQL_PASSWORD=replace-with-database-password
-MYSQL_ROOT_PASSWORD=replace-with-root-password
-MYSQL_PORT=33069
-```
+## First-Run Tutorial
 
-## Environment Variables
+### 1. Protect the console
 
-### Basic
+Keep <code>AUTH_ENABLED=true</code> for any host that is not strictly private. Use a strong admin password and put the service behind a reverse proxy or equivalent access control.
 
-```env
-HTTP_PORT=8080
-IMAGE_TAG=latest
-SERVER_MODE=release
-LOG_LEVEL=info
-```
+<code>APP_SECRET</code> encrypts upstream passwords, cookies, tokens, notification secrets, SMTP passwords, Captcha keys, and Sub2API target keys. Keep it unchanged after data is created.
 
-- `HTTP_PORT`: host port.
-- `IMAGE_TAG`: Docker image tag.
-- `SERVER_MODE`: Gin mode, usually `release`.
-- `LOG_LEVEL`: log level.
+### 2. Add upstream channels
 
-### Database
+Open **Channels and accounts** and add a NewAPI or Sub2API channel:
 
-SQLite:
+1. Enter the site URL and choose the credential mode.
+2. Use username/password or token/cookie credentials as supported by the upstream.
+3. Enable monitoring and set the low-balance threshold.
+4. Save, test login, and run the first balance/rate sync.
+5. Review the channel detail and API key actions after the first successful collection.
 
-```env
-DATABASE_DRIVER=sqlite
-DATABASE_PATH=/app/data/upstream-ops.db
-```
+RouteScope can also use a configured Captcha provider and an HTTP/HTTPS/SOCKS5 proxy for upstream requests.
 
-MySQL:
+### 3. Read the operational state
 
-```env
-DATABASE_DRIVER=mysql
-DATABASE_HOST=mysql
-DATABASE_PORT=3306
-DATABASE_USER=upstreamops
-DATABASE_PASSWORD=change-me
-DATABASE_NAME=upstreamops
-```
+Use **Overview** for the current summary. Use **Activity** to inspect failed collections, health probes, announcements, and alert delivery. Use **Group rates** to compare source-group rates and review changes before making a routing or synchronization decision.
 
-### Security and Login
+### 4. Configure notifications
 
-```env
-APP_SECRET=please-change-me-to-a-long-random-secret-32bytes-min
-AUTH_ENABLED=false
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=
-AUTH_TOKEN_SECRET=
-```
+Open **Notification center**, add a channel, then create a subscription rule. Rules can receive all events or be limited to selected upstreams and rate groups. Delivery attempts, failures, and cooldown state are retained for troubleshooting.
 
-- `APP_SECRET`: required master secret.
-- `AUTH_ENABLED`: enables admin login.
-- `ADMIN_USERNAME`: admin username.
-- `ADMIN_PASSWORD`: admin password.
-- `AUTH_TOKEN_SECRET`: token signing secret. Falls back to `APP_SECRET` when empty.
+Supported transports include Telegram, Webhook, Email, WeCom, DingTalk, Feishu, ServerChan3, and QQ Bot where enabled by the current build.
+
+### 5. Synchronize accounts to Sub2API
+
+Open **Upstream sync**:
+
+1. Add and test a writable Sub2API target.
+2. Synchronize target groups and proxies.
+3. Create a sync group and select the source channel, source group, target group, proxy, model limits, concurrency, weight, and rate conversion.
+4. Preview the account mapping, then apply it.
+5. Inspect execution logs and run an account test when needed.
+
+Remote deletion and other writes are explicit actions. Review the target and sync-group state before applying them.
+
+### 6. Set up the API relay
+
+Open **API relay** and configure:
+
+1. A gateway group with retry, failover, cooldown, and ordering policy.
+2. One or more routes from monitored channels or direct providers.
+3. Model mappings and the model-list mode: <code>auto</code>, <code>manual</code>, or <code>hybrid</code>.
+4. A gateway key for client applications.
+
+Clients use the gateway key, not an upstream account key:
+
+~~~http
+Authorization: Bearer sk-your-gateway-key
+~~~
+
+Common endpoints:
+
+~~~text
+GET  /v1/models
+POST /v1/chat/completions
+POST /v1/responses
+POST /v1/messages
+GET  /v1/usage
+~~~
+
+The relay supports OpenAI Chat/Completions, OpenAI Responses, and Anthropic Messages flows, including streaming conversion where the selected route supports it. Routes can use weighted scheduling, rate conversion, model rewrites, first-token timeout, temporary pause, and failover on upstream errors.
+
+### 7. Review usage and costs
+
+Open **Actual costs** to filter relay and upstream usage by model, endpoint, group, success state, and time. Check token counts, latency, request IDs, base cost, and actual cost before changing prices or route ratios.
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| <code>HTTP_PORT</code> | Host port exposed by Compose; defaults to <code>8080</code>. |
+| <code>IMAGE_TAG</code> | Container image tag; use <code>v0.1.0</code> for a pinned release. |
+| <code>APP_SECRET</code> | Stable AES-GCM key for encrypted application data. Required. |
+| <code>AUTH_ENABLED</code> | Enables the admin login gate. Use <code>true</code> for public or shared hosts. |
+| <code>ADMIN_USERNAME</code> | Admin login username. |
+| <code>ADMIN_PASSWORD</code> | Admin login password. Required when auth is enabled. |
+| <code>AUTH_TOKEN_SECRET</code> | Optional token signing secret; falls back to <code>APP_SECRET</code>. |
+| <code>DATABASE_DRIVER</code> | <code>sqlite</code> or <code>mysql</code>. |
+| <code>DATABASE_PATH</code> | SQLite path, normally <code>/app/data/upstream-ops.db</code>. |
+| <code>DATABASE_HOST</code> / <code>DATABASE_PORT</code> | MySQL connection settings. |
+| <code>DATABASE_USER</code> / <code>DATABASE_PASSWORD</code> / <code>DATABASE_NAME</code> | MySQL credentials and database name. |
+| <code>SERVER_MODE</code> / <code>LOG_LEVEL</code> | Runtime mode and log level. |
+
+Proxy, scheduler, retention, notification, Captcha, upstream HTTP, and API relay settings can be edited in **System settings**. Authentication, scheduler, notification policy, proxy, upstream HTTP, and relay runtime settings can be applied without restarting the process. Database connection, HTTP port, and log level changes require a restart.
 
 ## Local Development
 
-Backend:
+Requirements: Go 1.23+, Node.js 20+, and pnpm 10.4.0.
 
-```bash
+Start the backend:
+
+~~~bash
 go run ./cmd/server
-```
+~~~
 
-Default backend port:
+The backend listens on <code>http://127.0.0.1:8418</code> by default.
 
-```text
-8418
-```
+Start the frontend in another terminal:
 
-Frontend:
-
-```bash
+~~~bash
 cd frontend
 pnpm install
 pnpm dev
-```
+~~~
 
-Default frontend development URL:
+The Vite development server listens on <code>http://127.0.0.1:3010</code> and proxies API requests to the backend.
 
-```text
-http://127.0.0.1:3010
-```
+Run the main checks:
 
-Checks:
-
-```bash
+~~~bash
 go test ./...
-```
-
-```bash
 cd frontend
 pnpm lint
+pnpm test
 pnpm exec tsc --noEmit --incremental false
 pnpm build
-```
+~~~
 
-## Proxy and Upstream HTTP Settings
+## Backup and Security
 
-System settings can configure global proxy and upstream request settings. Proxy is disabled by default, protocol defaults to `http`, upstream timeout defaults to `30` seconds, and `User-Agent` defaults to `upstream-ops/0.1`.
+- SQLite deployments can use **System Settings → Data Backup → Web Backup and Restore** to create a consistent snapshot, download its ZIP, or upload a ZIP for restoration. Web restore first creates a safety snapshot, verifies SHA-256 hashes, the database driver, and the `APP_SECRET` fingerprint, then replaces the database/config and restarts the service. MySQL deployments continue to use the verified server-side helper below; the Web API reports that limitation explicitly.
 
-Configuration fields:
+- Create and verify a tagged snapshot before upgrades, migrations, imports, or remote writes:
 
-```yaml
-proxy:
-  enabled: false
-  versionCheckEnabled: false
-  protocol: http
-  host: 127.0.0.1
-  port: 7890
-  username: ""
-  password: ""
+  ~~~bash
+  BACKUP_TAG=before-upgrade ./scripts/backup-data.sh backup
+  ./scripts/backup-data.sh verify before-upgrade
+  ~~~
 
-upstream:
-  timeoutSeconds: 30
-  userAgent: upstream-ops/0.1
-```
+  On Windows use <code>powershell -ExecutionPolicy Bypass -File scripts/backup-data.ps1 -Command backup</code> and pass <code>-Tag before-upgrade</code> to <code>verify</code> or <code>restore</code>. The helper detects the effective SQLite or MySQL Compose configuration. SQLite snapshots contain the live database and <code>config.yaml</code>; MySQL snapshots contain a verified <code>mysqldump</code> and the same runtime configuration. Database rows cover upstream accounts, notification channels/subscriptions, Captcha/API credentials, sync targets, Gateway providers/keys/routes, and their operational history.
+- Restore only a verified tag, then check the health endpoint:
 
-- `proxy.enabled`: enables global proxy.
-- `proxy.versionCheckEnabled`: routes version checks through proxy.
-- `proxy.protocol`: `http`, `https`, or `socks5`.
-- `proxy.host` / `proxy.port`: proxy host and port.
-- `proxy.username` / `proxy.password`: optional proxy authentication.
-- `upstream.timeoutSeconds`: upstream request timeout.
-- `upstream.userAgent`: upstream request `User-Agent`.
-- When `proxy.enabled=false`, per-channel `proxy_enabled` settings do not take effect.
+  ~~~bash
+  ./scripts/backup-data.sh restore before-upgrade
+  ~~~
 
-Proxy test endpoint:
-
-```text
-POST /api/settings/proxy/test
-```
-
-## Upstream Channel Configuration
-
-Upstream channels can enable `proxy_enabled` individually. Upstream login, balance sync, rate sync, announcement sync, API key management, recharge, redeem, and subscription APIs use proxy only when both global proxy and channel proxy are enabled.
-
-### NewAPI
-
-NewAPI supports two credential modes.
-
-Username/password mode:
-
-- Provide upstream site URL, username, and password.
-- If the login endpoint requires extra fields, provide a JSON object in extra form parameters.
-- If Turnstile is enabled, configure a captcha provider first, then enable Turnstile in the channel.
-
-Token/cookie mode:
-
-```json
-{
-  "cookie": "session=xxx; other=yyy",
-  "user_id": "123"
-}
-```
-
-NewAPI token mode also supports the system access token (`user.access_token`, the 32 character token generated from the personal settings page). Use `access_token` instead of `cookie`. Cookie and access token are mutually exclusive, but `user_id` is always required:
-
-```json
-{
-  "access_token": "your-system-access-token",
-  "user_id": "123"
-}
-```
-
-When editing a NewAPI token/cookie channel, the form shows the saved `user_id` for reuse, while the saved cookie or access token remains hidden.
-
-### Sub2API
-
-Sub2API supports username/password mode and token mode.
-
-Token mode credentials:
-
-```json
-{
-  "access_token": "your-access-token",
-  "refresh_token": "your-refresh-token"
-}
-```
-
-`refresh_token` is optional but recommended. When present, Sub2API sessions and token-mode credentials can be refreshed automatically after access-token expiration. Without `refresh_token`, paste updated credentials when the token expires.
-
-### Clear Login Information
-
-The channel card menu provides a clear-login action:
-
-- Password mode: clears only cached login sessions.
-- Token mode: clears cached sessions and the saved token/cookie credential JSON.
-
-## Notification Channel Configuration
-
-Notification secrets, webhooks, and SMTP passwords are encrypted at rest. Add or edit a notification channel with the JSON configuration matching its type.
-
-Notification channels can enable `proxy_enabled` individually. Telegram, Webhook, WeCom, DingTalk, Feishu, and ServerChan3 requests use proxy only when both global proxy and notification-channel proxy are enabled.
-
-### Telegram
-
-```json
-{
-  "bot_token": "1234567890:AAEh...",
-  "chat_id": "-1001234567890"
-}
-```
-
-### Webhook
-
-```json
-{
-  "url": "https://example.com/hook",
-  "method": "POST",
-  "headers": {
-    "Authorization": "Bearer xxx"
-  }
-}
-```
-
-Webhook body example:
-
-```json
-{
-  "event": "announcement",
-  "subject": "[UpstreamOps] xxx",
-  "body": "notification body",
-  "extra": {}
-}
-```
-
-### Email
-
-```json
-{
-  "host": "smtp.example.com",
-  "port": 465,
-  "use_tls": true,
-  "username": "alert@example.com",
-  "password": "smtp-password-or-app-password",
-  "from": "alert@example.com",
-  "to": ["ops@example.com"]
-}
-```
-
-### WeCom
-
-```json
-{
-  "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx"
-}
-```
-
-### DingTalk
-
-```json
-{
-  "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
-  "secret": "SEC..."
-}
-```
-
-### Feishu
-
-```json
-{
-  "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxxx",
-  "secret": "..."
-}
-```
-
-### ServerChan3
-
-```json
-{
-  "uid": "your UID",
-  "sendkey": "sctp_xxx"
-}
-```
-
-Messages are sent through `https://{uid}.push.ft07.com/send/{sendkey}.send`.
-
-## Subscription Rules
-
-Notification channels can limit which upstreams, events, or rate groups they receive. Empty value, empty string, `null`, or `[]` means all upstreams and all events.
-
-```json
-[
-  { "channel_ids": [1, 2], "mode": "all" },
-  { "channel_ids": [3], "mode": "groups", "groups": ["default", "pro"], "events": ["rate_changed"] },
-  { "channel_ids": [4], "mode": "all", "events": ["announcement", "monitor_failed"] }
-]
-```
-
-- `channel_ids`: upstream channel ID list. Historical `channel_id` single-value rules are still accepted.
-- `events`: event type list. Empty means all events for that upstream.
-- `mode=all`: receive all rate groups.
-- `mode=groups`: receive only selected groups for rate-related events.
-
-## Notification Event Types
-
-- `balance_low`: balance below threshold.
-- `rate_changed`: rate changed.
-- `rate_structure_changed`: group structure changed.
-- `rate_added`: group added. Kept for historical compatibility.
-- `rate_removed`: group removed. Kept for historical compatibility.
-- `announcement`: new upstream announcement.
-- `login_failed`: login failed.
-- `captcha_failed`: captcha solving failed.
-- `monitor_failed`: balance, spending, or rate collection failed.
-- `subscription_daily_remaining_low`: daily subscription remaining quota below threshold.
-- `subscription_weekly_remaining_low`: weekly subscription remaining quota below threshold.
-- `subscription_monthly_remaining_low`: monthly subscription remaining quota below threshold.
-- `subscription_expiring`: subscription is about to expire.
-- `upstream_sync_group_changed`: a Sub2API synchronization group or managed account changed.
-
-## APIs and Operations
-
-Announcement list:
-
-```text
-GET /api/announcements?page=1&page_size=20
-```
-
-Notification logs:
-
-```text
-GET /api/notifications/logs?page=1&page_size=20
-```
-
-Notification log rows include the upstream channel ID when the event is tied to a specific upstream channel.
-
-Rate change logs:
-
-```text
-GET /api/rate-changes?page=1&page_size=20
-GET /api/rate-changes?channel_id=1&page=1&page_size=20
-```
-
-Channels:
-
-```text
-GET /api/channels?page=1&page_size=20
-GET /api/channels?page=1&page_size=-1
-POST /api/channels/:id/clear-login-info
-```
-
-Recharge:
-
-```text
-GET  /api/channels/:id/recharge-info
-POST /api/channels/:id/recharge
-```
-
-Redeem:
-
-```text
-POST /api/channels/:id/redeem
-```
-
-Subscription:
-
-```text
-GET  /api/channels/:id/subscription-info
-POST /api/channels/:id/subscription
-GET  /api/channels/:id/subscription-usage
-```
-
-Captcha providers:
-
-```text
-GET    /api/captcha-configs
-POST   /api/captcha-configs
-PUT    /api/captcha-configs/:id
-POST   /api/captcha-configs/:id/refresh-balance
-DELETE /api/captcha-configs/:id
-```
-
-Sub2API upstream synchronization targets:
-
-```text
-GET    /api/upstream-sync/targets
-POST   /api/upstream-sync/targets
-PUT    /api/upstream-sync/targets/:id
-DELETE /api/upstream-sync/targets/:id
-POST   /api/upstream-sync/targets/:id/check
-POST   /api/upstream-sync/targets/:id/groups/sync
-GET    /api/upstream-sync/targets/:id/groups
-GET    /api/upstream-sync/targets/:id/proxies
-GET    /api/upstream-sync/source-models?channel_id=1&platform=openai
-```
-
-`channel_id` is required. `platform` defaults to OpenAI-compatible model discovery and also supports `gemini`. Optional filters include `source_group_id`, `source_group_name`, and `sync_account_id`.
-
-Synchronization groups:
-
-```text
-GET    /api/upstream-sync/sync-groups
-POST   /api/upstream-sync/sync-groups
-PUT    /api/upstream-sync/sync-groups/:id
-DELETE /api/upstream-sync/sync-groups/:id
-POST   /api/upstream-sync/sync-groups/:id/apply
-POST   /api/upstream-sync/sync-groups/:id/delete-managed
-GET    /api/upstream-sync/sync-groups/:id/logs?page=1&page_size=20
-```
-
-The target Admin API Key is encrypted at rest. The managed-object action requests deletion of the remote Sub2API account and source-channel API key, clears the local mapping, and leaves target groups unchanged. Deleting a target or synchronization group only removes local records, so run the managed-object action first when remote cleanup is required.
-
-SSE progress endpoints:
-
-```text
-POST /api/channels/:id/test-login
-POST /api/channels/:id/sync
-POST /api/channels/sync-all
-```
-
-## Runtime Configuration Hot Reload
-
-The system settings page supports runtime hot reload without restarting the service.
-
-Hot-reloadable modules:
-
-- `app`
-- `auth`
-- `scheduler`
-- `notifications`
-- `retention`
-- `proxy`
-- `upstream`
-
-Database connection, HTTP port, and log level still require restart.
-
-## Scheduler and Retention
-
-Default schedules:
-
-- Balance sync: every 15 minutes.
-- Rate sync: every 30 minutes.
-- Enabled Sub2API synchronization groups: reapplied after rate sync.
-- Subscription usage check: runs with balance sync.
-- Captcha balance refresh: scheduled and manual refresh are supported.
-- History cleanup: daily.
-
-Default retention:
-
-- Monitor logs: 30 days.
-- Upstream synchronization logs: follow the monitor log retention period.
-- Balance snapshots: 90 days.
-- Notification logs: 90 days.
-- Upstream announcements: controlled by announcement retention days. `0` disables cleanup.
-- Rate change logs are not cleaned by default.
-
-## Data Security
-
-The following sensitive fields are encrypted with `APP_SECRET`:
-
-- Upstream account passwords.
-- NewAPI cookies.
-- Sub2API access tokens.
-- Sub2API target Admin API Keys.
-- Login session cookies and tokens.
-- Notification channel secrets.
-- SMTP passwords.
-- Captcha provider API keys.
-
-Important:
-
-- `APP_SECRET` must remain stable.
-- Changing `APP_SECRET` makes existing encrypted data undecryptable.
-- Back up `.env` or configuration files together with the database.
-
-## FAQ
-
-### The page opens, but API requests fail
-
-Check whether the backend service is running and whether reverse proxy routes `/api/*` correctly.
-
-Frontend development URL:
-
-```text
-http://127.0.0.1:3010
-```
-
-Backend URL:
-
-```text
-http://127.0.0.1:8418
-```
-
-### Upstream login fails
-
-Check the site URL, username, password, Turnstile requirement, captcha provider configuration, and whether token or cookie credentials have expired.
-
-### Announcements are not pushed
-
-Check whether the first announcement baseline sync has completed, rate sync runs successfully, notification channels are enabled, subscription rules include the upstream, and failed notification logs exist.
-
-### Rate changes are not pushed
-
-Check the minimum change percentage, notification subscription groups, and rate change history.
-
-### Added or removed groups are not pushed
-
-Added and removed groups are merged into a `rate_structure_changed` notification for the same scan. If a notification channel uses `mode=groups`, the added/removed list is filtered by subscribed groups before generating the notification.
-
-The first rate sync only creates a baseline and does not push all existing groups as newly added groups.
-
-### Low-balance alerts repeat too rarely
-
-Check the low-balance alert cooldown in system settings. Cooldown state is stored in the database and survives restarts.
+  Encrypted credentials require the same <code>APP_SECRET</code>. The manifest stores only its SHA-256 fingerprint and restore refuses a mismatched key; the secret itself is never copied into the snapshot.
+- Never change <code>APP_SECRET</code> after encrypted data has been created unless the data has been migrated deliberately.
+- Do not place real passwords, API keys, cookies, or tokens in README examples, screenshots, test fixtures, or logs.
+- Keep the admin console behind authentication and restrict gateway keys with group status, quotas, IP rules, and route policy where appropriate.
+- Review sync previews, execution logs, gateway usage, and notification failures after operational changes.
 
 ## License
 

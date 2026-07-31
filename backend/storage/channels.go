@@ -12,13 +12,52 @@ type Channels struct{ db *gorm.DB }
 
 func NewChannels(db *gorm.DB) *Channels { return &Channels{db: db} }
 
+// ErrChannelDeleteBlocked marks a delete that would leave live control-plane
+// resources pointing at a missing upstream channel.
+var ErrChannelDeleteBlocked = errors.New("channel deletion blocked by active references")
+
+// ChannelDeleteBlockedError describes the live references that must be removed
+// or reconfigured before an upstream channel can be deleted.
+type ChannelDeleteBlockedError struct {
+	SyncAccounts  int64
+	GatewayRoutes int64
+}
+
+func (e *ChannelDeleteBlockedError) Error() string {
+	return "channel deletion blocked by active references"
+}
+
+func (e *ChannelDeleteBlockedError) Unwrap() error { return ErrChannelDeleteBlocked }
+
 func (r *Channels) Create(c *Channel) error { return r.db.Create(c).Error }
 func (r *Channels) Update(c *Channel) error { return r.db.Save(c).Error }
+func (r *Channels) SetFavorite(id uint, favorite bool) (*Channel, error) {
+	result := r.db.Model(&Channel{}).Where("id = ?", id).Update("favorite", favorite)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return r.FindByID(id)
+}
 func (r *Channels) Delete(id uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var channel Channel
 		if err := tx.Select("id", "name").First(&channel, id).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
+		}
+		if channel.ID != 0 {
+			var blocked ChannelDeleteBlockedError
+			if err := tx.Model(&UpstreamSyncAccount{}).Where("source_channel_id = ?", id).Count(&blocked.SyncAccounts).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&GatewayRoute{}).Where("source_channel_id = ?", id).Count(&blocked.GatewayRoutes).Error; err != nil {
+				return err
+			}
+			if blocked.SyncAccounts > 0 || blocked.GatewayRoutes > 0 {
+				return &blocked
+			}
 		}
 		if err := tx.Where("channel_id = ?", id).Delete(&AuthSession{}).Error; err != nil {
 			return err
@@ -28,9 +67,11 @@ func (r *Channels) Delete(id uint) error {
 			&RateChangeLog{},
 			&BalanceSnapshot{},
 			&CostSnapshot{},
+			&UpstreamUsageSnapshot{},
 			&MonitorLog{},
 			&NotificationCooldown{},
 			&UpstreamAnnouncement{},
+			&PrimaryRoute{},
 		} {
 			if err := tx.Where("channel_id = ?", id).Delete(model).Error; err != nil {
 				return err

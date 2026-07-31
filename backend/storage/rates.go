@@ -30,6 +30,28 @@ func (r *Rates) ListByChannel(channelID uint) ([]RateSnapshot, error) {
 	return list, nil
 }
 
+// ListByChannels returns current rate snapshots for a bounded set of channels in one query.
+func (r *Rates) ListByChannels(channelIDs []uint) ([]RateSnapshot, error) {
+	if len(channelIDs) == 0 {
+		return []RateSnapshot{}, nil
+	}
+	var list []RateSnapshot
+	if err := r.db.Where("channel_id IN ?", channelIDs).Order("channel_id ASC, model_name ASC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ListByModel returns the current snapshot for every channel carrying modelName.
+func (r *Rates) ListByModel(modelName string) ([]RateSnapshot, error) {
+	var list []RateSnapshot
+	if err := r.db.Where("model_name = ?", modelName).
+		Order("channel_id ASC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // Upsert 更新或插入倍率快照，返回此前的记录（若有），调用方据此判断是否变化。
 func (r *Rates) Upsert(snapshot *RateSnapshot) (*RateSnapshot, error) {
 	var prev RateSnapshot
@@ -86,7 +108,7 @@ func (r *Rates) ListChanges(channelID uint, limit int) ([]RateChangeLog, error) 
 	return list, nil
 }
 
-func (r *Rates) ListChangesPage(channelID uint, page, pageSize int) ([]RateChangeLog, int64, error) {
+func (r *Rates) ListChangesPage(channelID uint, remoteGroupID *int64, modelName string, page, pageSize int) ([]RateChangeLog, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -97,6 +119,13 @@ func (r *Rates) ListChangesPage(channelID uint, page, pageSize int) ([]RateChang
 	q := r.db.Model(&RateChangeLog{})
 	if channelID != 0 {
 		q = q.Where("channel_id = ?", channelID)
+	}
+	if remoteGroupID != nil && modelName != "" {
+		q = q.Where("remote_group_id = ? OR (remote_group_id IS NULL AND model_name = ?)", *remoteGroupID, modelName)
+	} else if remoteGroupID != nil {
+		q = q.Where("remote_group_id = ?", *remoteGroupID)
+	} else if modelName != "" {
+		q = q.Where("model_name = ?", modelName)
 	}
 
 	var total int64

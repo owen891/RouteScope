@@ -1,3 +1,4 @@
+// Package syncer 上游同步服务（公告/余额等相关任务）。
 package syncer
 
 import (
@@ -18,6 +19,7 @@ import (
 	"github.com/bejix/upstream-ops/backend/connector/sub2api"
 	"github.com/bejix/upstream-ops/backend/crypto"
 	"github.com/bejix/upstream-ops/backend/notify"
+	"github.com/bejix/upstream-ops/backend/pkg/rateconvert"
 	"github.com/bejix/upstream-ops/backend/storage"
 )
 
@@ -110,6 +112,25 @@ type TargetProxyDTO struct {
 	Status   string `json:"status"`
 }
 
+// TargetUpstreamDTO is a safe, read-only projection of an existing target
+// account. Credentials are deliberately excluded; applying a target account
+// rule updates the existing remote object without replacing its secret.
+type TargetUpstreamDTO struct {
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Platform       string   `json:"platform,omitempty"`
+	Type           string   `json:"type,omitempty"`
+	Status         string   `json:"status"`
+	Schedulable    bool     `json:"schedulable"`
+	Concurrency    int      `json:"concurrency"`
+	Priority       int      `json:"priority"`
+	RateMultiplier float64  `json:"rate_multiplier"`
+	LoadFactor     float64  `json:"load_factor"`
+	ProxyID        *int64   `json:"proxy_id,omitempty"`
+	GroupIDs       []int64  `json:"group_ids"`
+	GroupNames     []string `json:"group_names"`
+}
+
 type SyncGroupDTO struct {
 	ID                       uint             `json:"id"`
 	DisplayName              string           `json:"display_name"`
@@ -135,6 +156,8 @@ type SyncGroupDTO struct {
 
 type SyncAccountDTO struct {
 	ID               uint    `json:"id,omitempty"`
+	SourceMode       string  `json:"source_mode"`
+	TargetAccountID  *int64  `json:"target_account_id,omitempty"`
 	SourceChannelID  uint    `json:"source_channel_id"`
 	SourceGroupID    *int64  `json:"source_group_id,omitempty"`
 	SourceGroupName  string  `json:"source_group_name,omitempty"`
@@ -372,6 +395,100 @@ func (s *Service) ListTargetProxies(ctx context.Context, targetID uint) ([]Targe
 			Status:   strings.TrimSpace(proxy.Status),
 		})
 	}
+	return out, nil
+}
+
+// ListTargetUpstreams reads the destination site directly and returns the
+// existing accounts assigned to the selected destination groups. The local
+// group IDs are translated to remote IDs through the synchronized group cache;
+// group metadata and account membership are then refreshed from Admin API.
+func (s *Service) ListTargetUpstreams(ctx context.Context, targetID uint, targetGroupIDs []uint) ([]TargetUpstreamDTO, error) {
+	if len(targetGroupIDs) == 0 {
+		return []TargetUpstreamDTO{}, nil
+	}
+	target, err := s.targets.FindByID(targetID)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := s.cipher.Decrypt(target.AdminAPIKeyCipher)
+	if err != nil {
+		return nil, err
+	}
+
+	localGroups, err := s.groups.ListByTarget(targetID, true)
+	if err != nil {
+		return nil, err
+	}
+	selectedRemoteIDs := make(map[int64]struct{}, len(targetGroupIDs))
+	for _, localID := range targetGroupIDs {
+		found := false
+		for _, group := range localGroups {
+			if group.ID == localID {
+				selectedRemoteIDs[group.RemoteGroupID] = struct{}{}
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("target group missing: %d", localID)
+		}
+	}
+
+	client := sub2api.NewAdminClient()
+	adminTarget := sub2api.AdminTarget{BaseURL: target.BaseURL, APIKey: plain}
+	remoteGroups, err := client.ListGroups(ctx, adminTarget, true)
+	if err != nil {
+		_ = s.targets.UpdateCheck(targetID, "failed", ptrTime(time.Now()), err.Error())
+		return nil, err
+	}
+	groupNames := make(map[int64]string, len(remoteGroups))
+	for _, group := range remoteGroups {
+		if _, ok := selectedRemoteIDs[group.ID]; ok {
+			groupNames[group.ID] = group.Name
+		}
+	}
+	remoteAccounts, err := client.ListAccounts(ctx, adminTarget, 1, 1000)
+	if err != nil {
+		_ = s.targets.UpdateCheck(targetID, "failed", ptrTime(time.Now()), err.Error())
+		return nil, err
+	}
+
+	out := make([]TargetUpstreamDTO, 0)
+	for _, account := range remoteAccounts {
+		matchedNames := make([]string, 0)
+		for _, groupID := range account.GroupIDs {
+			if _, ok := selectedRemoteIDs[groupID]; !ok {
+				continue
+			}
+			if name := strings.TrimSpace(groupNames[groupID]); name != "" {
+				matchedNames = append(matchedNames, name)
+			}
+		}
+		if len(matchedNames) == 0 {
+			continue
+		}
+		out = append(out, TargetUpstreamDTO{
+			ID:             account.ID,
+			Name:           account.Name,
+			Platform:       account.Platform,
+			Type:           account.Type,
+			Status:         strings.TrimSpace(account.Status),
+			Schedulable:    account.Schedulable,
+			Concurrency:    account.Concurrency,
+			Priority:       account.Priority,
+			RateMultiplier: account.RateMultiplier,
+			LoadFactor:     account.LoadFactor,
+			ProxyID:        account.ProxyID,
+			GroupIDs:       append([]int64(nil), account.GroupIDs...),
+			GroupNames:     matchedNames,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority < out[j].Priority
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
@@ -821,6 +938,9 @@ func (s *Service) sortAccountsForApply(ctx context.Context, syncGroup *storage.U
 }
 
 func sourceGroupMissingForSort(account *storage.UpstreamSyncAccount, groups []connector.APIKeyGroup) bool {
+	if strings.EqualFold(strings.TrimSpace(account.SourceMode), "target") {
+		return account.TargetAccountID == nil || *account.TargetAccountID <= 0
+	}
 	sourceGroupName := strings.TrimSpace(account.SourceGroupName)
 	if account.SourceGroupID == nil && sourceGroupName == "" {
 		return true
@@ -907,7 +1027,7 @@ func (s *Service) applyAccountWithCleanup(
 	remoteBeforeByID map[int64]sub2api.AdminAccount,
 	now time.Time,
 ) syncAccountApplyOutcome {
-	if !account.Enabled {
+	if !account.Enabled && !strings.EqualFold(strings.TrimSpace(account.SourceMode), "target") {
 		change, err := s.disableManagedTargetForSkippedAccount(ctx, syncGroup, account, adminTarget, client, remoteBeforeByID, now, "同步账号已禁用")
 		if err != nil {
 			msg := fmt.Sprintf("同步账号%d: disable managed target: %s", account.Position+1, err.Error())
@@ -915,7 +1035,7 @@ func (s *Service) applyAccountWithCleanup(
 		}
 		return syncAccountApplyOutcome{Changes: singleChange(change)}
 	}
-	if account.SourceGroupID == nil && strings.TrimSpace(account.SourceGroupName) == "" {
+	if !strings.EqualFold(strings.TrimSpace(account.SourceMode), "target") && account.SourceGroupID == nil && strings.TrimSpace(account.SourceGroupName) == "" {
 		msg := fmt.Sprintf("同步账号%d: source group not bound", account.Position+1)
 		change, err := s.ensureDisabledPlaceholderTargetForAccount(ctx, syncGroup, account, adminTarget, client, selectedGroups, remoteGroupIDs, remoteBeforeByID, now, "源分组未绑定")
 		if err != nil {
@@ -962,6 +1082,9 @@ func (s *Service) applyAccount(
 	remoteBeforeByID map[int64]sub2api.AdminAccount,
 	now time.Time,
 ) (*accountApplyResult, error) {
+	if strings.EqualFold(strings.TrimSpace(syncAccount.SourceMode), "target") {
+		return s.applyExistingTargetAccount(ctx, syncGroup, syncAccount, adminTarget, client, selectedGroups, remoteGroupIDs, remoteBeforeByID, now)
+	}
 	ch, err := s.channels.FindByID(syncAccount.SourceChannelID)
 	if err != nil {
 		return nil, fmt.Errorf("source channel missing: %d", syncAccount.SourceChannelID)
@@ -1098,6 +1221,99 @@ func (s *Service) applyAccount(
 		SyncedModels: syncedModels,
 		Message:      msg,
 		Changes:      append(accountChangeDetails(syncAccount, previous, accountReq, account.ID), singleChange(testChange)...),
+	}, nil
+}
+
+func (s *Service) applyExistingTargetAccount(
+	ctx context.Context,
+	syncGroup *storage.UpstreamSyncGroup,
+	syncAccount *storage.UpstreamSyncAccount,
+	adminTarget sub2api.AdminTarget,
+	client *sub2api.AdminClient,
+	selectedGroups []storage.UpstreamSyncTargetGroup,
+	remoteGroupIDs []int64,
+	remoteBeforeByID map[int64]sub2api.AdminAccount,
+	now time.Time,
+) (*accountApplyResult, error) {
+	if syncAccount.TargetAccountID == nil || *syncAccount.TargetAccountID <= 0 {
+		return nil, errors.New("target account is required")
+	}
+	previous, ok := remoteBeforeByID[*syncAccount.TargetAccountID]
+	if !ok {
+		return nil, fmt.Errorf("target account missing: %d", *syncAccount.TargetAccountID)
+	}
+	next := previous
+	next.GroupIDs = append([]int64(nil), remoteGroupIDs...)
+	next.Concurrency = positiveOrDefault(syncAccount.Concurrency, 10)
+	next.Priority = syncAccount.Position + 1
+	next.LoadFactor = positiveFloatOrDefault(float64(syncAccount.Weight), 1)
+	next.ProxyID = syncAccount.ProxyID
+	next.RateMultiplier = previous.RateMultiplier
+	if strings.EqualFold(strings.TrimSpace(syncAccount.RateConvertMode), "custom") {
+		next.RateMultiplier = positiveFloatOrDefault(syncAccount.RateConvertValue, previous.RateMultiplier)
+	}
+	if syncAccount.Enabled {
+		next.Status = "active"
+	} else {
+		next.Status = "inactive"
+	}
+	if syncGroup.ModelLimitsMode == "custom" {
+		if next.Credentials == nil {
+			next.Credentials = map[string]any{}
+		}
+		next.Credentials["model_mapping"] = modelMappingFromModels(splitList(syncGroup.ModelLimitsText))
+	}
+	updated, err := client.UpdateAccount(ctx, adminTarget, previous.ID, next)
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		updated = &next
+	}
+	syncedModels := []string(nil)
+	if syncGroup.ModelLimitsMode == "sync_upstream" {
+		models, err := client.SyncAccountModelsFromUpstream(ctx, adminTarget, updated.ID)
+		if err != nil {
+			_ = s.disableRemoteAccount(ctx, adminTarget, client, *updated, now, err.Error())
+			return nil, err
+		}
+		if len(models) == 0 {
+			err := errors.New("synced upstream models is empty")
+			_ = s.disableRemoteAccount(ctx, adminTarget, client, *updated, now, err.Error())
+			return nil, err
+		}
+		syncedModels = models
+	}
+	if err := s.syncRemoteAccountSchedulable(ctx, adminTarget, client, updated); err != nil {
+		return nil, err
+	}
+	testMessage := ""
+	testChange := ""
+	if syncAccount.Enabled && syncAccount.TestEnabled {
+		testMessage, testChange, err = s.testManagedTargetAccount(ctx, adminTarget, client, syncAccount, updated)
+		if err != nil {
+			return nil, err
+		}
+	}
+	message := fmt.Sprintf(
+		"账号%d：更新目标上游 %s(ID %d)，倍率 %s，权重 %d，并发 %d",
+		syncAccount.Position+1,
+		updated.Name,
+		updated.ID,
+		formatNumber(updated.RateMultiplier),
+		syncAccount.Weight,
+		positiveOrDefault(syncAccount.Concurrency, 10),
+	)
+	if len(selectedGroups) > 0 {
+		message += fmt.Sprintf("，目标分组 %d 个", len(selectedGroups))
+	}
+	if testMessage != "" {
+		message += "，" + testMessage
+	}
+	return &accountApplyResult{
+		SyncedModels: syncedModels,
+		Message:      message,
+		Changes:      append(accountChangeDetails(syncAccount, &previous, *updated, updated.ID), singleChange(testChange)...),
 	}, nil
 }
 
@@ -2001,16 +2217,7 @@ func priorityForSourceGroup(syncGroup *storage.UpstreamSyncGroup, syncAccount *s
 }
 
 func convertRate(v float64, mode string, customValue float64) float64 {
-	switch strings.TrimSpace(mode) {
-	case "multiply_100":
-		return v * 100
-	case "divide_100":
-		return v / 100
-	case "custom":
-		return customValue
-	default:
-		return v
-	}
+	return rateconvert.Convert(v, mode, customValue)
 }
 
 func rateMultiplierForAccount(syncAccount *storage.UpstreamSyncAccount, groups []connector.APIKeyGroup) float64 {
@@ -2329,6 +2536,10 @@ func splitList(raw string) []string {
 func accountItems(list []SyncAccountDTO) []storage.UpstreamSyncAccount {
 	out := make([]storage.UpstreamSyncAccount, 0, len(list))
 	for i, item := range list {
+		sourceMode := strings.TrimSpace(item.SourceMode)
+		if sourceMode != "target" {
+			sourceMode = "local"
+		}
 		mode := strings.TrimSpace(item.RateConvertMode)
 		if mode == "" {
 			mode = "raw"
@@ -2348,6 +2559,8 @@ func accountItems(list []SyncAccountDTO) []storage.UpstreamSyncAccount {
 		out = append(out, storage.UpstreamSyncAccount{
 			ID:               item.ID,
 			Position:         i,
+			SourceMode:       sourceMode,
+			TargetAccountID:  item.TargetAccountID,
 			SourceChannelID:  item.SourceChannelID,
 			SourceGroupID:    item.SourceGroupID,
 			SourceGroupName:  strings.TrimSpace(item.SourceGroupName),
@@ -2495,8 +2708,14 @@ func (s *Service) syncGroupDTOByItem(item *storage.UpstreamSyncGroup) *SyncGroup
 func accountDTOs(list []storage.UpstreamSyncAccount) []SyncAccountDTO {
 	out := make([]SyncAccountDTO, 0, len(list))
 	for _, item := range list {
+		sourceMode := strings.TrimSpace(item.SourceMode)
+		if sourceMode != "target" {
+			sourceMode = "local"
+		}
 		out = append(out, SyncAccountDTO{
 			ID:               item.ID,
+			SourceMode:       sourceMode,
+			TargetAccountID:  item.TargetAccountID,
 			SourceChannelID:  item.SourceChannelID,
 			SourceGroupID:    item.SourceGroupID,
 			SourceGroupName:  item.SourceGroupName,

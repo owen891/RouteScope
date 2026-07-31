@@ -86,6 +86,8 @@ export type NotificationEvent =
   | "subscription_monthly_remaining_low"
   | "subscription_expiring"
   | "upstream_sync_group_changed"
+  | "adjustment_executed"
+  | "adjustment_rolled_back"
 
 export interface Channel {
   id: number
@@ -94,6 +96,7 @@ export interface Channel {
   site_url: string
   username: string
   sort_order: number
+  favorite: boolean
   user_id?: string
   credential_mode: CredentialMode
   login_extra_params: string
@@ -154,6 +157,7 @@ export interface RateSnapshot {
 export interface RateChangeLog {
   id: number
   channel_id: number
+  remote_group_id?: number | null
   model_name: string
   old_ratio: number | null
   new_ratio: number
@@ -277,6 +281,7 @@ export interface SystemAuthConfig {
   username: string
   passwordConfigured: boolean
   tokenSecretConfigured: boolean
+  environmentOverrides?: string[]
   sessionTTLHours: number
 }
 
@@ -346,6 +351,19 @@ export interface SystemUpstreamConfig {
   userAgent: string
 }
 
+/** API 转发运行时参数（设置页可改，Apply 后立即生效） */
+export interface SystemGatewayConfig {
+  tempPauseSeconds: number
+  forwardTimeoutSeconds: number
+  modelsCacheTTLSeconds: number
+  maxFailoverSwitches: number
+  routeBatchConcurrency: number
+  usageErrorBodyBytes: number
+  usageErrorMsgRunes: number
+  usageErrorHeaderValueRunes: number
+  usageErrorHeadersJSONBytes: number
+}
+
 export interface SystemConfig {
   app: AppConfig
   auth: SystemAuthConfig
@@ -353,6 +371,7 @@ export interface SystemConfig {
   notifications: SystemNotificationsConfig
   proxy: SystemProxyConfig
   upstream: SystemUpstreamConfig
+  gateway: SystemGatewayConfig
 }
 
 export interface SystemConfigInput {
@@ -362,11 +381,33 @@ export interface SystemConfigInput {
   notifications: SystemNotificationsConfig
   proxy: SystemProxyConfigInput
   upstream: SystemUpstreamConfig
+  gateway: SystemGatewayConfig
 }
 
 export interface SystemConfigResponse {
   config_path: string
   config: SystemConfig
+}
+
+export interface WebBackupItem {
+  tag: string
+  created_at: string
+  driver: string
+  mode: string
+  size_bytes: number
+  valid: boolean
+  error?: string
+}
+
+export interface WebBackupListResponse {
+  items: WebBackupItem[]
+}
+
+export interface WebBackupRestoreResult {
+  restored: boolean
+  restart_required: boolean
+  safety_backup: string
+  message: string
 }
 
 export interface AppVersion {
@@ -590,10 +631,28 @@ export interface UpstreamSyncTargetProxy {
   status: string
 }
 
+export interface UpstreamSyncTargetUpstream {
+  id: number
+  name: string
+  platform?: string
+  type?: string
+  status: string
+  schedulable: boolean
+  concurrency: number
+  priority: number
+  rate_multiplier: number
+  load_factor: number
+  proxy_id?: number | null
+  group_ids: number[]
+  group_names: string[]
+}
+
 export type UpstreamSyncRateConvertMode = "raw" | "multiply_100" | "divide_100" | "custom"
 
 export interface UpstreamSyncAccount {
   id?: number
+  source_mode?: "local" | "target"
+  target_account_id?: number | null
   source_channel_id: number
   source_group_id?: number | null
   source_group_name?: string
@@ -646,4 +705,677 @@ export interface UpstreamSyncLogPage {
   page: number
   page_size: number
   pages: number
+}
+
+// ---------- Gateway ----------
+
+export type GatewayKeyStatus = "active" | "disabled"
+export type GatewayGroupStatus = "active" | "disabled"
+export type GatewayRateSortDirection = "asc" | "desc"
+export type GatewayRateConvertMode = "raw" | "multiply_100" | "divide_100" | "custom"
+export type GatewayModelsMode = "auto" | "manual" | "hybrid"
+/** 上游协议：auto / OpenAI Chat / OpenAI Responses / Anthropic；openai 为 chat 历史别名 */
+export type GatewayUpstreamProtocol =
+  | "auto"
+  | "openai"
+  | "openai_chat"
+  | "openai_responses"
+  | "anthropic"
+
+export interface GatewayGroup {
+  id: number
+  name: string
+  description?: string
+  /** 侧栏排序，越小越靠前 */
+  position?: number
+  status: GatewayGroupStatus
+  rate_sort_direction: GatewayRateSortDirection
+  /**
+   * 渠道分组价格倍率重排：开启后，倍率扫描结束时按源分组实时倍率
+   * 重写路由顺序与账号计费倍率（对齐上游同步账号）。
+   */
+  rate_resort_enabled?: boolean
+  model_mapping?: string
+  models_json?: string
+  models_mode: GatewayModelsMode
+  /** 重试总开关：关闭则失败直接回显，不重试不顺延 */
+  retry_enabled?: boolean
+  /** 同一路由额外重试次数（不含首次） */
+  retry_count?: number
+  /** 是否顺延下一条路由 */
+  failover_enabled?: boolean
+  /** 顺延次数（首条之后最多再换几条） */
+  failover_max?: number
+  /**
+   * 4xx 也走重试/顺延。默认 false：仅网络错误、429、5xx；
+   * 开启后 400/401/403/404 等 4xx 同样会重试与顺延（429 始终可顺延）。
+   */
+  failover_on_4xx?: boolean
+  /** 失败冷却秒数，0=不冷却 */
+  cooldown_seconds?: number
+  /**
+   * 首字/首字节超时（秒）。0=关闭；≥1 时超过该时间未收到首字节则主动断开并走重试/顺延。
+   * 可能增加计费（上游已计费却换路由再请求）。
+   */
+  first_token_timeout_sec?: number
+  /**
+   * 组级统一 User-Agent。路由 user_agent_mode=group 时使用；
+   * 转发 / 模型测试 / 拉模型渠道共用。
+   */
+  user_agent?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GatewayKey {
+  id: number
+  group_id: number
+  name: string
+  key_prefix: string
+  status: GatewayKeyStatus
+  quota: number
+  quota_used: number
+  ip_whitelist?: string
+  ip_blacklist?: string
+  last_used_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface GatewayKeyCreateResult {
+  key: GatewayKey
+  secret: string
+}
+
+/** monitor = 监控渠道；provider = 直连 BaseURL+Key */
+export type GatewayRouteSourceKind = "monitor" | "provider"
+
+export interface GatewayProvider {
+  id: number
+  name: string
+  base_url: string
+  api_key_hint: string
+  upstream_protocol: GatewayUpstreamProtocol
+  default_billing_rate: number
+  auth_style?: string
+  enabled: boolean
+  /** 与监控渠道一致：全局代理开启且本开关打开时，转发走系统代理 */
+  proxy_enabled?: boolean
+  extra_headers?: string
+  notes?: string
+  created_at: string
+  updated_at: string
+}
+
+/** 路由 User-Agent：透传客户端 / 用组 UA / 路由自定义 */
+export type GatewayUserAgentMode = "passthrough" | "group" | "custom"
+
+export interface GatewayProviderPage {
+  items: GatewayProvider[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface GatewayProviderOption {
+  id: number
+  name: string
+  base_url: string
+  api_key_hint: string
+  upstream_protocol: GatewayUpstreamProtocol
+  default_billing_rate: number
+  enabled: boolean
+}
+
+export interface GatewayRoute {
+  id: number
+  gateway_group_id: number
+  position: number
+  source_kind?: GatewayRouteSourceKind
+  source_channel_id: number
+  gateway_provider_id?: number
+  source_group_id?: number | null
+  source_group_name?: string
+  weight: number
+  rate_convert_mode: GatewayRateConvertMode
+  rate_convert_value: number
+  billing_rate_multiplier: number
+  enabled: boolean
+  model_mapping?: string
+  upstream_protocol: GatewayUpstreamProtocol
+  concurrency: number
+  /** 透传 / 组 UA / 自定义；默认透传 */
+  user_agent_mode?: GatewayUserAgentMode
+  /** mode=custom 时的 User-Agent；转发/模型测试/拉模型共用 */
+  user_agent_custom?: string
+  source_api_key_id: number
+  source_api_key_name: string
+  temp_unschedulable_until?: string | null
+  temp_unschedulable_reason?: string
+  /** 最近一次触发暂停的失败请求时间 */
+  temp_unschedulable_at?: string | null
+  /** 最近一次触发暂停的网关 request_id（与使用记录关联） */
+  temp_unschedulable_request_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GatewayModelSource {
+  route_id?: number
+  channel_id: number
+  channel_name?: string
+  source_group_id?: number | null
+  source_group_name?: string
+}
+
+export interface GatewayModelListItem {
+  id: string
+  source: "sync" | "custom"
+  channel_ids?: number[]
+  sources?: GatewayModelSource[]
+}
+
+export interface GatewayModelTestResult {
+  route_id: number
+  channel_id: number
+  channel_name?: string
+  source_group_id?: number | null
+  source_group_name?: string
+  label: string
+  requested_model: string
+  upstream_model: string
+  upstream_path?: string
+  ok: boolean
+  status_code: number
+  latency_ms: number
+  error?: string
+}
+
+export interface GatewayModelSyncRouteResult {
+  route_id: number
+  source_kind: string
+  channel_id?: number
+  channel_name?: string
+  provider_id?: number
+  provider_name?: string
+  label: string
+  ok: boolean
+  skipped: boolean
+  model_count: number
+  error?: string
+  skip_reason?: string
+}
+
+export interface GatewayModelSyncResult {
+  group: GatewayGroup
+  model_count: number
+  routes: GatewayModelSyncRouteResult[]
+  ok_count: number
+  fail_count: number
+  skip_count: number
+}
+
+export interface GatewayEnsureKeyRouteResult {
+  route_id: number
+  source_kind: string
+  channel_id?: number
+  channel_name?: string
+  provider_id?: number
+  provider_name?: string
+  label: string
+  key_name?: string
+  ok: boolean
+  skipped: boolean
+  error?: string
+  skip_reason?: string
+}
+
+export interface GatewayEnsureKeysResult {
+  items: GatewayRoute[]
+  routes: GatewayEnsureKeyRouteResult[]
+  ok_count: number
+  fail_count: number
+  skip_count: number
+}
+
+export interface GatewayModelTestResponse {
+  items: GatewayModelTestResult[]
+  ok_count: number
+  total: number
+  all_ok: boolean
+}
+
+export interface GatewayUsageLog {
+  id: number
+  gateway_group_id: number
+  gateway_key_id: number
+  route_id: number
+  channel_id: number
+  gateway_provider_id?: number
+  provider_name?: string
+  request_id: string
+  /** 同一 request_id 下第几次尝试（从 1 起） */
+  attempt?: number
+  /** primary | retry | failover */
+  attempt_kind?: string
+  /** 本条失败触发的冷却截止 */
+  cooldown_until?: string | null
+  requested_model: string
+  upstream_model?: string
+  model_mapping_chain?: string
+  inbound_endpoint?: string
+  upstream_endpoint?: string
+  inbound_protocol?: string
+  upstream_protocol?: string
+  protocol_converted?: boolean
+  request_type: number
+  service_tier?: string
+  reasoning_effort?: string
+  billing_mode?: string
+  /** 不含缓存的新鲜输入（sub2api 互斥桶） */
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  cache_creation_5m_tokens?: number
+  cache_creation_1h_tokens?: number
+  image_output_tokens?: number
+  /** 推理 token（含在 output 计费内，仅展示） */
+  reasoning_tokens?: number
+  input_cost: number
+  output_cost: number
+  cache_creation_cost: number
+  cache_read_cost: number
+  image_output_cost?: number
+  total_cost: number
+  actual_cost: number
+  account_stats_cost?: number
+  rate_multiplier: number
+  billing_rate_multiplier: number
+  account_rate_multiplier?: number
+  stream: boolean
+  status_code: number
+  success: boolean
+  /** 短摘要 */
+  error_message?: string
+  /** transport | http | config | internal */
+  error_type?: string
+  /** 人类可读详情（含 method/url/status） */
+  error_detail?: string
+  upstream_url?: string
+  /** 上游原始错误 body（截断） */
+  upstream_error_body?: string
+  /** 上游响应头 JSON（脱敏） */
+  upstream_error_headers?: string
+  duration_ms: number
+  first_token_ms?: number | null
+  ip_address?: string
+  user_agent?: string
+  created_at: string
+  /** 列表 enrich 字段 */
+  gateway_key_name?: string
+  gateway_group_name?: string
+  channel_name?: string
+  source_group_name?: string
+  source_api_key_name?: string
+}
+
+export interface GatewayUsagePage {
+  items: GatewayUsageLog[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  sum_cost: number
+}
+
+export interface GatewayUsageStats {
+  total_requests: number
+  success_count: number
+  error_count: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  total_tokens: number
+  total_cost: number
+  total_actual_cost: number
+  average_duration_ms: number
+  /** 近 5 分钟平均每分钟请求数 */
+  rpm?: number
+  /** 近 5 分钟平均每分钟 Token 数（input+output） */
+  tpm?: number
+  endpoints: { endpoint: string; requests: number }[]
+}
+
+export interface UpstreamModelPriceItem {
+  channel_id: number
+  channel_name: string
+  channel_type: ChannelType
+  source_name: string
+  platform: string
+  group_id: number
+  group_name: string
+  rate_multiplier: number
+  peak_rate_enabled: boolean
+  peak_rate_multiplier: number
+  model_name: string
+  billing_mode: string
+  tier_label: string
+  min_tokens?: number
+  max_tokens?: number
+  base_input_price_per_million?: number
+  base_output_price_per_million?: number
+  base_cache_write_price_per_million?: number
+  base_cache_read_price_per_million?: number
+  base_image_input_price_per_million?: number
+  base_image_output_price_per_million?: number
+  input_price_per_million?: number
+  output_price_per_million?: number
+  cache_write_price_per_million?: number
+  cache_read_price_per_million?: number
+  image_input_price_per_million?: number
+  image_output_price_per_million?: number
+  base_per_request_price?: number
+  per_request_price?: number
+  peak_input_price_per_million?: number
+  peak_output_price_per_million?: number
+  peak_cache_write_price_per_million?: number
+  peak_cache_read_price_per_million?: number
+  peak_image_input_price_per_million?: number
+  peak_image_output_price_per_million?: number
+  peak_per_request_price?: number
+}
+
+export interface UpstreamModelPriceError {
+  channel_id: number
+  channel_name: string
+  channel_type: ChannelType
+  error: string
+}
+
+export interface UpstreamModelPricesResponse {
+  items: UpstreamModelPriceItem[]
+  errors: UpstreamModelPriceError[]
+}
+
+/** 使用记录模型下拉：后端按 requested_model 聚合 */
+export interface GatewayUsageModelOption {
+  model: string
+  count: number
+}
+
+export interface ModelPriceOverride {
+  id: number
+  model_name: string
+  input_price_per_token: number
+  output_price_per_token: number
+  cache_creation_price_per_token: number
+  cache_read_price_per_token: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** 内置默认价（只读），字段与覆盖表 per-token 一致 */
+export interface ModelDefaultPrice {
+  model_name: string
+  input_price_per_token: number
+  output_price_per_token: number
+  cache_creation_price_per_token: number
+  cache_read_price_per_token: number
+}
+
+export interface RateComparisonEntry {
+  channel_id: number
+  channel_name: string
+  channel_type: string
+  ratio: number
+  completion_ratio: number
+  last_seen_at: string
+  last_change_at?: string | null
+  last_old_ratio?: number | null
+  last_new_ratio?: number | null
+  deviation_pct: number
+  outlier: boolean
+}
+
+export interface ModelComparison {
+  model_name: string
+  count: number
+  min_ratio: number
+  max_ratio: number
+  median_ratio: number
+  entries: RateComparisonEntry[]
+}
+
+export interface RateComparisonResult {
+  query?: string
+  deviation_pct: number
+  generated_at: string
+  models: ModelComparison[]
+  model_names: string[]
+}
+
+export interface PrimaryRoute {
+  id: number
+  model_name: string
+  channel_id: number
+  operator: string
+  selected_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RouteAdviceCandidate {
+  priority: number
+  channel_id: number
+  channel_name: string
+  channel_type: string
+  eligible: boolean
+  recommended: boolean
+  current_primary: boolean
+  score: number
+  ratio: number
+  completion_ratio: number
+  rate_seen_at: string
+  balance?: number | null
+  balance_threshold: number
+  health_status: "healthy" | "unhealthy" | "unknown"
+  health_sampled_at?: string | null
+  reasons: string[]
+  risks: string[]
+}
+
+export interface RouteAdviceResult {
+  model_name: string
+  generated_at: string
+  recommended_channel_id?: number | null
+  current_primary?: PrimaryRoute | null
+  candidates: RouteAdviceCandidate[]
+}
+
+export interface RouteAdviceAudit {
+  id: number
+  model_name: string
+  action: "set_primary"
+  previous_channel_id?: number | null
+  channel_id: number
+  operator: string
+  snapshot_json: string
+  created_at: string
+}
+
+export interface AdjustmentTarget {
+  id: number
+  name: string
+  enabled: boolean
+}
+
+export interface AdjustmentConfig {
+  gross_margin_pct?: number
+  /** Legacy response field retained while older backends are being restarted. */
+  profit_margin_pct?: number
+}
+
+export interface AdjustmentGroup {
+  id: number
+  target_id: number
+  remote_group_id: number
+  name: string
+  platform?: string
+  ratio: number
+  status: string
+  last_sync_at?: string | null
+}
+
+export interface AdjustmentPreview {
+  action: "execute" | "rollback"
+  source_audit_id?: number | null
+  target_id: number
+  target_name: string
+  remote_group_id: number
+  group_name: string
+  group_status: string
+  before_ratio: number
+  after_ratio: number
+  change_percent: number
+  impact_scope: string
+  executable: boolean
+  blockers: string[]
+  generated_at: string
+}
+
+export interface AdjustmentAudit {
+  id: number
+  action: "execute" | "rollback"
+  source_audit_id?: number | null
+  target_id: number
+  target_name: string
+  remote_group_id: number
+  group_name: string
+  before_ratio: number
+  after_ratio: number
+  operator: string
+  input: string
+  status: "pending" | "succeeded" | "failed" | "uncertain"
+  upstream_summary?: string
+  error_message?: string
+  notification_error?: string
+  created_at: string
+  completed_at?: string | null
+}
+
+
+export interface FeishuControlStatus {
+  enabled: boolean
+  configured: boolean
+  encryption_configured: boolean
+  admin_auth_enabled: boolean
+  callback_path: string
+  bind_code_ttl_minutes: number
+  bind_code_max_attempts: number
+  bound: boolean
+  bound_open_id_masked?: string
+  bound_at?: string | null
+}
+
+export interface FeishuBindingCode {
+  code: string
+  command: string
+  expires_at: string
+}
+
+export interface UpstreamUsageTotals {
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  actual_cost: number
+  standard_cost: number
+  average_duration_ms?: number
+}
+
+export interface UpstreamUsageModel {
+  model: string
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  actual_cost: number
+  standard_cost: number
+}
+
+export interface UpstreamUsageGroup {
+  group_id: number
+  group_name: string
+  requests: number
+  total_tokens: number
+  actual_cost: number
+  standard_cost: number
+}
+
+export interface UpstreamUsageTrend {
+  date: string
+  requests: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  actual_cost: number
+  standard_cost: number
+}
+
+export interface UpstreamUsageChannel {
+  channel_id: number
+  channel_name: string
+  channel_type: ChannelType
+  source: "upstream_api" | string
+  start_date: string
+  end_date: string
+  granularity: string
+  totals: UpstreamUsageTotals
+  models: UpstreamUsageModel[]
+  groups?: UpstreamUsageGroup[]
+  trend?: UpstreamUsageTrend[]
+  fetched_at?: string
+  cached: boolean
+  stale: boolean
+  refreshing: boolean
+}
+
+export interface UpstreamUsageError {
+  channel_id: number
+  channel_name: string
+  channel_type: ChannelType
+  error: string
+  last_attempt_at?: string
+  cached: boolean
+  retrying: boolean
+  has_stale_data: boolean
+}
+
+export interface UpstreamUsageCacheInfo {
+  persisted: boolean
+  fresh_for_seconds: number
+  cached_channels: number
+  live_channels: number
+  refreshing_channels: number
+  generated_at: string
+}
+
+export interface UpstreamUsageResponse {
+  source: "upstream_api" | string
+  start_date: string
+  end_date: string
+  totals: UpstreamUsageTotals
+  channels: UpstreamUsageChannel[]
+  errors: UpstreamUsageError[]
+  cache: UpstreamUsageCacheInfo
 }

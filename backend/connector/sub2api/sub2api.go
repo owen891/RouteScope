@@ -228,6 +228,218 @@ func (c *Client) GetCosts(ctx context.Context, ch *connector.Channel, session *c
 	}, nil
 }
 
+type sub2UsageModel struct {
+	Model               string  `json:"model"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	ActualCost          float64 `json:"actual_cost"`
+	Cost                float64 `json:"cost"`
+}
+
+type sub2UsageGroup struct {
+	GroupID     int64   `json:"group_id"`
+	GroupName   string  `json:"group_name"`
+	Requests    int64   `json:"requests"`
+	TotalTokens int64   `json:"total_tokens"`
+	ActualCost  float64 `json:"actual_cost"`
+	Cost        float64 `json:"cost"`
+}
+
+type sub2UsageTrend struct {
+	Date                string  `json:"date"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	ActualCost          float64 `json:"actual_cost"`
+	Cost                float64 `json:"cost"`
+}
+
+type sub2UsageStats struct {
+	TotalRequests            int64   `json:"total_requests"`
+	TotalInputTokens         int64   `json:"total_input_tokens"`
+	TotalOutputTokens        int64   `json:"total_output_tokens"`
+	TotalCacheCreationTokens int64   `json:"total_cache_creation_tokens"`
+	TotalCacheReadTokens     int64   `json:"total_cache_read_tokens"`
+	TotalTokens              int64   `json:"total_tokens"`
+	TotalActualCost          float64 `json:"total_actual_cost"`
+	TotalCost                float64 `json:"total_cost"`
+	AverageDurationMS        float64 `json:"average_duration_ms"`
+}
+
+// GetUsageAnalytics 从 Sub2API 的使用记录接口读取真实账单统计。
+// ActualCost 和 StandardCost 分别直接映射上游 actual_cost 与 cost，不应用本地充值倍率。
+func (c *Client) GetUsageAnalytics(ctx context.Context, ch *connector.Channel, session *connector.AuthSession, query connector.UsageAnalyticsQuery) (*connector.UsageAnalytics, error) {
+	site := strings.TrimRight(ch.SiteURL, "/")
+	granularity := strings.TrimSpace(query.Granularity)
+	if granularity == "" {
+		granularity = "day"
+	}
+	params := url.Values{}
+	if start := strings.TrimSpace(query.StartDate); start != "" {
+		params.Set("start_date", start)
+	}
+	if end := strings.TrimSpace(query.EndDate); end != "" {
+		params.Set("end_date", end)
+	}
+
+	snapshotParams := cloneValues(params)
+	snapshotParams.Set("granularity", granularity)
+	snapshotParams.Set("include_trend", "true")
+	snapshotParams.Set("include_model_stats", "true")
+	snapshotParams.Set("include_group_stats", "true")
+
+	analytics := &connector.UsageAnalytics{
+		Source:      "upstream_api",
+		StartDate:   strings.TrimSpace(query.StartDate),
+		EndDate:     strings.TrimSpace(query.EndDate),
+		Granularity: granularity,
+		Models:      []connector.UsageModelStat{},
+		Groups:      []connector.UsageGroupStat{},
+		Trend:       []connector.UsageTrendPoint{},
+	}
+
+	body, snapshotErr := c.getJSON(ctx, withQuery(site+"/api/v1/usage/dashboard/snapshot-v2", snapshotParams), session)
+	if snapshotErr == nil {
+		var snapshot struct {
+			StartDate   string           `json:"start_date"`
+			EndDate     string           `json:"end_date"`
+			Granularity string           `json:"granularity"`
+			Models      []sub2UsageModel `json:"models"`
+			Groups      []sub2UsageGroup `json:"groups"`
+			Trend       []sub2UsageTrend `json:"trend"`
+		}
+		if err := json.Unmarshal(body, &snapshot); err != nil {
+			return nil, fmt.Errorf("sub2api usage snapshot decode: %w", err)
+		}
+		if snapshot.StartDate != "" {
+			analytics.StartDate = snapshot.StartDate
+		}
+		if snapshot.EndDate != "" {
+			analytics.EndDate = snapshot.EndDate
+		}
+		if snapshot.Granularity != "" {
+			analytics.Granularity = snapshot.Granularity
+		}
+		analytics.Models = mapSub2UsageModels(snapshot.Models)
+		analytics.Groups = mapSub2UsageGroups(snapshot.Groups)
+		analytics.Trend = mapSub2UsageTrend(snapshot.Trend)
+		analytics.Totals = sumUsageModels(analytics.Models)
+	} else {
+		modelsBody, modelsErr := c.getJSON(ctx, withQuery(site+"/api/v1/usage/dashboard/models", params), session)
+		if modelsErr != nil {
+			return nil, fmt.Errorf("sub2api usage snapshot: %v; models fallback: %w", snapshotErr, modelsErr)
+		}
+		var models struct {
+			StartDate string           `json:"start_date"`
+			EndDate   string           `json:"end_date"`
+			Models    []sub2UsageModel `json:"models"`
+		}
+		if err := json.Unmarshal(modelsBody, &models); err != nil {
+			return nil, fmt.Errorf("sub2api usage models decode: %w", err)
+		}
+		if models.StartDate != "" {
+			analytics.StartDate = models.StartDate
+		}
+		if models.EndDate != "" {
+			analytics.EndDate = models.EndDate
+		}
+		analytics.Models = mapSub2UsageModels(models.Models)
+		analytics.Totals = sumUsageModels(analytics.Models)
+	}
+
+	if statsBody, err := c.getJSON(ctx, withQuery(site+"/api/v1/usage/stats", params), session); err == nil {
+		var stats sub2UsageStats
+		if json.Unmarshal(statsBody, &stats) == nil {
+			analytics.Totals = connector.UsageTotals{
+				Requests:            stats.TotalRequests,
+				InputTokens:         stats.TotalInputTokens,
+				OutputTokens:        stats.TotalOutputTokens,
+				CacheCreationTokens: stats.TotalCacheCreationTokens,
+				CacheReadTokens:     stats.TotalCacheReadTokens,
+				TotalTokens:         stats.TotalTokens,
+				ActualCost:          stats.TotalActualCost,
+				StandardCost:        stats.TotalCost,
+				AverageDurationMS:   stats.AverageDurationMS,
+			}
+		}
+	}
+	return analytics, nil
+}
+
+func mapSub2UsageModels(items []sub2UsageModel) []connector.UsageModelStat {
+	out := make([]connector.UsageModelStat, 0, len(items))
+	for _, item := range items {
+		out = append(out, connector.UsageModelStat{
+			Model: item.Model, Requests: item.Requests,
+			InputTokens: item.InputTokens, OutputTokens: item.OutputTokens,
+			CacheCreationTokens: item.CacheCreationTokens, CacheReadTokens: item.CacheReadTokens,
+			TotalTokens: item.TotalTokens, ActualCost: item.ActualCost, StandardCost: item.Cost,
+		})
+	}
+	return out
+}
+
+func mapSub2UsageGroups(items []sub2UsageGroup) []connector.UsageGroupStat {
+	out := make([]connector.UsageGroupStat, 0, len(items))
+	for _, item := range items {
+		out = append(out, connector.UsageGroupStat{
+			GroupID: item.GroupID, GroupName: item.GroupName, Requests: item.Requests,
+			TotalTokens: item.TotalTokens, ActualCost: item.ActualCost, StandardCost: item.Cost,
+		})
+	}
+	return out
+}
+
+func mapSub2UsageTrend(items []sub2UsageTrend) []connector.UsageTrendPoint {
+	out := make([]connector.UsageTrendPoint, 0, len(items))
+	for _, item := range items {
+		out = append(out, connector.UsageTrendPoint{
+			Date: item.Date, Requests: item.Requests,
+			InputTokens: item.InputTokens, OutputTokens: item.OutputTokens,
+			CacheCreationTokens: item.CacheCreationTokens, CacheReadTokens: item.CacheReadTokens,
+			TotalTokens: item.TotalTokens, ActualCost: item.ActualCost, StandardCost: item.Cost,
+		})
+	}
+	return out
+}
+
+func sumUsageModels(items []connector.UsageModelStat) connector.UsageTotals {
+	var totals connector.UsageTotals
+	for _, item := range items {
+		totals.Requests += item.Requests
+		totals.InputTokens += item.InputTokens
+		totals.OutputTokens += item.OutputTokens
+		totals.CacheCreationTokens += item.CacheCreationTokens
+		totals.CacheReadTokens += item.CacheReadTokens
+		totals.TotalTokens += item.TotalTokens
+		totals.ActualCost += item.ActualCost
+		totals.StandardCost += item.StandardCost
+	}
+	return totals
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, items := range values {
+		cloned[key] = append([]string(nil), items...)
+	}
+	return cloned
+}
+
+func withQuery(endpoint string, values url.Values) string {
+	if len(values) == 0 {
+		return endpoint
+	}
+	return endpoint + "?" + values.Encode()
+}
+
 func (c *Client) rechargeMultiplier(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) *float64 {
 	if ch.RechargeMultiplier != nil && *ch.RechargeMultiplier > 0 {
 		return ch.RechargeMultiplier
@@ -281,6 +493,124 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 		})
 	}
 	return out, nil
+}
+
+// GetModelPrices 读取当前账号可见的 Sub2API 内部渠道、分组和模型价目。
+// /channels/available 的模型价格是 USD/token；分组倍率单独返回，并可能被用户专属倍率覆盖。
+func (c *Client) GetModelPrices(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) ([]connector.ModelPriceResult, error) {
+	site := strings.TrimRight(ch.SiteURL, "/")
+	body, err := c.getJSON(ctx, site+"/api/v1/channels/available", session)
+	if err != nil {
+		return nil, fmt.Errorf("sub2api available channel pricing: %w", err)
+	}
+
+	type pricingInterval struct {
+		MinTokens       int      `json:"min_tokens"`
+		MaxTokens       *int     `json:"max_tokens"`
+		TierLabel       string   `json:"tier_label"`
+		InputPrice      *float64 `json:"input_price"`
+		OutputPrice     *float64 `json:"output_price"`
+		CacheWritePrice *float64 `json:"cache_write_price"`
+		CacheReadPrice  *float64 `json:"cache_read_price"`
+		PerRequestPrice *float64 `json:"per_request_price"`
+	}
+	type modelPricing struct {
+		BillingMode      string            `json:"billing_mode"`
+		InputPrice       *float64          `json:"input_price"`
+		OutputPrice      *float64          `json:"output_price"`
+		CacheWritePrice  *float64          `json:"cache_write_price"`
+		CacheReadPrice   *float64          `json:"cache_read_price"`
+		ImageInputPrice  *float64          `json:"image_input_price"`
+		ImageOutputPrice *float64          `json:"image_output_price"`
+		PerRequestPrice  *float64          `json:"per_request_price"`
+		Intervals        []pricingInterval `json:"intervals"`
+	}
+	type availableModel struct {
+		Name     string        `json:"name"`
+		Platform string        `json:"platform"`
+		Pricing  *modelPricing `json:"pricing"`
+	}
+	type availableGroup struct {
+		ID                 int64   `json:"id"`
+		Name               string  `json:"name"`
+		RateMultiplier     float64 `json:"rate_multiplier"`
+		PeakRateEnabled    bool    `json:"peak_rate_enabled"`
+		PeakRateMultiplier float64 `json:"peak_rate_multiplier"`
+	}
+	type platformSection struct {
+		Platform        string           `json:"platform"`
+		Groups          []availableGroup `json:"groups"`
+		SupportedModels []availableModel `json:"supported_models"`
+	}
+	var sources []struct {
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Platforms   []platformSection `json:"platforms"`
+	}
+	if err := json.Unmarshal(body, &sources); err != nil {
+		return nil, fmt.Errorf("sub2api available channel pricing decode: %w", err)
+	}
+
+	overrides := map[string]float64{}
+	if ratesBody, ratesErr := c.getJSON(ctx, site+"/api/v1/groups/rates", session); ratesErr == nil {
+		_ = json.Unmarshal(ratesBody, &overrides)
+	}
+
+	items := make([]connector.ModelPriceResult, 0)
+	for _, source := range sources {
+		for _, section := range source.Platforms {
+			for _, group := range section.Groups {
+				rate := group.RateMultiplier
+				if override, ok := overrides[strconv.FormatInt(group.ID, 10)]; ok && override > 0 {
+					rate = override
+				}
+				if rate <= 0 {
+					rate = 1
+				}
+				for _, model := range section.SupportedModels {
+					platform := strings.TrimSpace(model.Platform)
+					if platform == "" {
+						platform = strings.TrimSpace(section.Platform)
+					}
+					item := connector.ModelPriceResult{
+						SourceName:         strings.TrimSpace(source.Name),
+						SourceDescription:  strings.TrimSpace(source.Description),
+						Platform:           platform,
+						GroupID:            group.ID,
+						GroupName:          strings.TrimSpace(group.Name),
+						RateMultiplier:     rate,
+						PeakRateEnabled:    group.PeakRateEnabled,
+						PeakRateMultiplier: group.PeakRateMultiplier,
+						ModelName:          strings.TrimSpace(model.Name),
+					}
+					if model.Pricing != nil {
+						item.BillingMode = strings.TrimSpace(model.Pricing.BillingMode)
+						item.InputPrice = model.Pricing.InputPrice
+						item.OutputPrice = model.Pricing.OutputPrice
+						item.CacheWritePrice = model.Pricing.CacheWritePrice
+						item.CacheReadPrice = model.Pricing.CacheReadPrice
+						item.ImageInputPrice = model.Pricing.ImageInputPrice
+						item.ImageOutputPrice = model.Pricing.ImageOutputPrice
+						item.PerRequestPrice = model.Pricing.PerRequestPrice
+						for _, interval := range model.Pricing.Intervals {
+							item.Intervals = append(item.Intervals, connector.ModelPriceInterval{
+								MinTokens:       interval.MinTokens,
+								MaxTokens:       interval.MaxTokens,
+								TierLabel:       strings.TrimSpace(interval.TierLabel),
+								InputPrice:      interval.InputPrice,
+								OutputPrice:     interval.OutputPrice,
+								CacheWritePrice: interval.CacheWritePrice,
+								CacheReadPrice:  interval.CacheReadPrice,
+								PerRequestPrice: interval.PerRequestPrice,
+							})
+						}
+					}
+					items = append(items, item)
+				}
+			}
+		}
+	}
+	return items, nil
 }
 
 func ptrInt64(v uint64) *int64 {
@@ -1231,10 +1561,7 @@ func buildSub2CreateAPIKey(req connector.APIKeyCreateRequest) map[string]any {
 }
 
 func buildSub2UpdateAPIKey(req connector.APIKeyUpdateRequest) (map[string]any, error) {
-	body := map[string]any{
-		"ip_whitelist": safeStringSlice(req.IPWhitelist),
-		"ip_blacklist": safeStringSlice(req.IPBlacklist),
-	}
+	body := map[string]any{}
 	if req.Name != nil {
 		body["name"] = strings.TrimSpace(*req.Name)
 	}
@@ -1253,6 +1580,12 @@ func buildSub2UpdateAPIKey(req connector.APIKeyUpdateRequest) (map[string]any, e
 	}
 	if req.ExpiresAt != nil {
 		body["expires_at"] = strings.TrimSpace(*req.ExpiresAt)
+	}
+	if req.IPWhitelist != nil {
+		body["ip_whitelist"] = safeStringSlice(req.IPWhitelist)
+	}
+	if req.IPBlacklist != nil {
+		body["ip_blacklist"] = safeStringSlice(req.IPBlacklist)
 	}
 	if req.ResetQuota != nil {
 		body["reset_quota"] = *req.ResetQuota

@@ -49,12 +49,12 @@ func TestHealthProbeConfigCRUD(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	if err := hp.AppendRun(&HealthProbeRun{
-		ConfigID:  cfg.ID,
-		URL:       cfg.URL,
-		Success:   true,
+		ConfigID:   cfg.ID,
+		URL:        cfg.URL,
+		Success:    true,
 		StatusCode: 200,
-		LatencyMS: 12,
-		StartedAt: time.Now(),
+		LatencyMS:  12,
+		StartedAt:  time.Now(),
 		FinishedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("append run: %v", err)

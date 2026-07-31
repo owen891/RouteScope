@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import {
+  ArrowDown,
+  ArrowUp,
   ArrowUpDown,
   CheckCircle2,
   ChevronDown,
@@ -18,12 +20,13 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Search,
-  Tags,
+  Star,
   Trash2,
   Gift,
   ChevronsLeft,
   ChevronsRight,
+  Grid2X2,
+  List,
   XCircle,
   FileUp,
 } from "lucide-react"
@@ -48,23 +51,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useConfirm } from "@/components/ui/confirm-dialog"
-import { useChannels, useChannelsPage, useChannelRates } from "@/lib/queries"
+import { useChannelRateSummaries, useChannels, useChannelsPage } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
-import { useTriggerRefresh } from "@/lib/refresh-context"
-import { channelTypeLabel, decimal, formatRatio, money, relativeTime } from "@/lib/format"
+import { useRefreshTick, useTriggerRefresh } from "@/lib/refresh-context"
+import { channelTypeLabel, decimal, formatDurationMS, formatRatio, formatTokens, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncAllChannelsStream, syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
-import type { Channel, ChannelRedeemResult, CredentialMode, RateSnapshot } from "@/lib/api-types"
+import type { Channel, ChannelRedeemResult, CredentialMode, RateSnapshot, UpstreamUsageResponse } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { ChannelImportDialog } from "@/components/monitor/channel-import-dialog"
 import { ChannelRedeemDialog } from "@/components/monitor/channel-redeem-dialog"
 import { ChannelRechargeDialog } from "@/components/monitor/channel-recharge-dialog"
-import { ChannelAPIKeysDialog } from "@/components/monitor/channel-api-keys-dialog"
+import {
+  ChannelAPIKeysDialog,
+  type ChannelAPIKeyInitialAction,
+} from "@/components/monitor/channel-api-keys-dialog"
 import {
   ChannelSubscriptionUsageMetricTiles,
 } from "@/components/monitor/channel-subscription-usage-dialog"
@@ -74,10 +77,14 @@ import {
   classifyChannelError,
   type ChannelErrorKind,
 } from "@/lib/channel-error"
+import { hasUsageDurationSample, hasUsagePriceSample, usageDateRange, usageUnitMetrics } from "@/lib/upstream-usage"
 
 type Status = "healthy" | "low" | "failed" | "idle"
 type ChannelPageSize = 9 | 18 | 36 | 72 | 81 | "all"
-type GroupSortMode = "channel-asc" | "channel-desc" | "ratio-asc" | "ratio-desc"
+type ChannelViewMode = "cards" | "list"
+type ChannelSortKey = "balance" | "actualPrice" | "usage" | "latency" | "todayCost"
+type ChannelSortDirection = "asc" | "desc"
+type ChannelSortState = { key: ChannelSortKey; direction: ChannelSortDirection } | null
 
 const channelPageSizeOptions: ChannelPageSize[] = [9, 18, 36, 72, 81, "all"]
 
@@ -95,10 +102,10 @@ function statusOf(c: Channel): Status {
 }
 
 const statusMap: Record<Status, { label: string; cls: string }> = {
-  healthy: { label: "健康", cls: "text-success bg-success/10" },
-  low: { label: "低余额", cls: "text-warning bg-warning/10" },
-  failed: { label: "登录失败", cls: "text-danger bg-danger/10" },
-  idle: { label: "尚未采集", cls: "text-muted-foreground bg-muted/40" },
+  healthy: { label: "健康", cls: "text-success bg-success/10 ring-success/25" },
+  low: { label: "低余额", cls: "text-warning bg-warning/10 ring-warning/25" },
+  failed: { label: "登录失败", cls: "text-danger bg-danger/10 ring-danger/25" },
+  idle: { label: "尚未采集", cls: "text-muted-foreground bg-muted/70 ring-border" },
 }
 
 function failedStatusLabel(c: Channel): string {
@@ -117,6 +124,84 @@ function StatTile({ label, children }: { label: string; children: React.ReactNod
   )
 }
 
+function SortableChannelHead({
+  children,
+  label,
+  sortKey,
+  sortState,
+  onSort,
+  className,
+  align = "center",
+}: {
+  children: React.ReactNode
+  label: string
+  sortKey: ChannelSortKey
+  sortState: ChannelSortState
+  onSort: (key: ChannelSortKey) => void
+  className?: string
+  align?: "left" | "center"
+}) {
+  const active = sortState?.key === sortKey
+  const direction = active ? sortState.direction : null
+  const Icon = direction === "asc" ? ArrowUp : direction === "desc" ? ArrowDown : ArrowUpDown
+  const sortLabel = active
+    ? `当前按${label}${direction === "asc" ? "升序" : "降序"}，再次点击切换`
+    : `按${label}排序`
+
+  return (
+    <TableHead
+      className={cn("h-10 p-0", className)}
+      aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}
+    >
+      <button
+        type="button"
+        className={cn(
+          "flex min-h-10 w-full items-center gap-1 px-3 py-2 text-[inherit] transition-colors hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          align === "left" ? "justify-start" : "justify-center",
+        )}
+        aria-label={sortLabel}
+        title={sortLabel}
+        onClick={() => onSort(sortKey)}
+      >
+        <span>{children}</span>
+        <Icon className={cn("size-3.5 shrink-0", active ? "text-foreground" : "text-muted-foreground/70")} aria-hidden="true" />
+      </button>
+    </TableHead>
+  )
+}
+
+function channelSortValue(
+  channel: Channel,
+  key: ChannelSortKey,
+  usageByChannel: Map<number, UpstreamUsageResponse["channels"][number]>,
+): number | null {
+  if (key === "balance") return channel.last_balance ?? null
+  if (key === "todayCost") return channel.today_cost ?? null
+
+  const usage = usageByChannel.get(channel.id)
+  if (!usage) return null
+  if (key === "usage") return usage.totals.total_tokens
+  if (key === "latency") {
+    return hasUsageDurationSample(usage.totals) ? usage.totals.average_duration_ms ?? null : null
+  }
+  return hasUsagePriceSample(usage.totals) ? usageUnitMetrics(usage.totals).actualPerMillion : null
+}
+
+function compareChannelSortValues(
+  a: number | null,
+  b: number | null,
+  direction: ChannelSortDirection,
+): number {
+  const aMissing = a == null || !Number.isFinite(a)
+  const bMissing = b == null || !Number.isFinite(b)
+  if (aMissing || bMissing) {
+    if (aMissing && bMissing) return 0
+    return aMissing ? 1 : -1
+  }
+  const result = a - b
+  return direction === "asc" ? result : -result
+}
+
 function rechargeMultiplierTip(c: Channel) {
   const mode = c.recharge_multiplier_mode === "multiply" ? "余额 × 倍率" : "余额 / 倍率"
   if (c.recharge_multiplier != null && c.recharge_multiplier > 0) {
@@ -125,17 +210,13 @@ function rechargeMultiplierTip(c: Channel) {
   return `充值倍率：跟随上游（${mode}）`
 }
 
-/** ratioTone 按倍率给 chip 上色，与 ChannelRatesPanel 共用同一套规则。 */
-function ratioTone(r: number): string {
-  if (r <= 0.8) return "bg-success/10 text-success ring-success/20"
-  if (r > 2) return "bg-danger/10 text-danger ring-danger/20"
-  if (r > 1.2) return "bg-warning/10 text-warning ring-warning/20"
-  return "bg-muted text-foreground ring-border"
+/** Keep rate chips neutral but distinct; status colors remain reserved for health. */
+function ratioTone(): string {
+  return "bg-foreground/[0.055] text-foreground ring-foreground/15"
 }
 
 /** InlineRates 在渠道卡片内部展示当前所有分组倍率，默认 2 行折叠 + 展开按钮。 */
-function InlineRates({ channelID }: { channelID: number }) {
-  const { data, loading } = useChannelRates(channelID)
+function InlineRates({ rates: data, loading }: { rates?: RateSnapshot[]; loading: boolean }) {
   const rates = [...(data ?? [])].sort((a, b) => a.ratio - b.ratio)
   const [expanded, setExpanded] = useState(false)
   const [hasOverflow, setHasOverflow] = useState(false)
@@ -199,11 +280,11 @@ function InlineRates({ channelID }: { channelID: number }) {
                 <span
                   className={cn(
                     "inline-flex cursor-default items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ring-1 ring-inset transition-colors hover:bg-muted/60",
-                    ratioTone(r.ratio),
+                    ratioTone(),
                   )}
                 >
                   <span className="font-medium">{r.model_name}</span>
-                  <span className="rounded bg-primary/10 px-1 font-semibold tabular-nums text-primary ring-1 ring-inset ring-primary/15">
+                  <span className="rounded bg-background px-1 font-semibold tabular-nums text-foreground ring-1 ring-inset ring-border">
                     {formatRatio(r.ratio)}
                   </span>
                 </span>
@@ -232,194 +313,80 @@ function InlineRates({ channelID }: { channelID: number }) {
   )
 }
 
-interface ChannelGroupRow {
-  key: string
-  channel: Channel
-  rate: RateSnapshot
-}
-
-function ChannelGroupsDialog({
-  open,
-  onOpenChange,
-  channels,
+function ChannelListGroups({
+  rates: data,
+  loading,
+  emptyLabel = "暂无分组",
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  channels: Channel[]
+  rates?: RateSnapshot[]
+  loading: boolean
+  emptyLabel?: string
 }) {
-  const [query, setQuery] = useState("")
-  const [sortMode, setSortMode] = useState<GroupSortMode>("channel-asc")
-  const [rows, setRows] = useState<ChannelGroupRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const groupBoxClass = "flex h-[3.75rem] max-w-[360px] content-start flex-wrap items-start gap-1 overflow-hidden"
+  const groups = useMemo(() => {
+    const seen = new Set<string>()
+    return (data ?? []).filter((rate) => {
+      const name = rate.model_name.trim()
+      if (!name || seen.has(name)) return false
+      seen.add(name)
+      return true
+    })
+  }, [data])
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-
-    Promise.all(
-      channels.map(async (channel) => {
-        const rates = await apiFetch<RateSnapshot[]>(`/channels/${channel.id}/rates`)
-        return { channel, rates }
-      }),
+  if (loading && !data) {
+    return (
+      <div className={groupBoxClass}>
+        <span className="text-[11px] text-muted-foreground">加载中…</span>
+      </div>
     )
-      .then((result) => {
-        if (cancelled) return
-        setRows(
-          result.flatMap(({ channel, rates }) =>
-            rates.map((rate) => ({
-              key: `${channel.id}-${rate.id}`,
-              channel,
-              rate,
-            })),
-          ),
-        )
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setError(e.message || "加载分组失败")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+  }
+  if (groups.length === 0) {
+    return (
+      <div className={groupBoxClass}>
+        <span className="text-[11px] text-muted-foreground">{emptyLabel}</span>
+      </div>
+    )
+  }
 
-    return () => {
-      cancelled = true
-    }
-  }, [open, channels])
-
-  const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return rows
-      .filter(({ channel, rate }) => {
-        if (!q) return true
-        return [
-          channel.name,
-          channelTypeLabel(channel.type),
-          rate.model_name,
-          rate.description ?? "",
-          formatRatio(rate.ratio),
-        ].some((value) => value.toLowerCase().includes(q))
-      })
-      .sort((a, b) => {
-        if (sortMode === "ratio-asc" || sortMode === "ratio-desc") {
-          const diff = a.rate.ratio - b.rate.ratio
-          return sortMode === "ratio-asc" ? diff : -diff
-        }
-        const diff = a.channel.name.localeCompare(b.channel.name, "zh-CN")
-          || a.rate.model_name.localeCompare(b.rate.model_name, "zh-CN")
-        return sortMode === "channel-asc" ? diff : -diff
-      })
-  }, [query, rows, sortMode])
-
-  const channelCount = new Set(rows.map((row) => row.channel.id)).size
+  const collapsedCount = 4
+  const visible = expanded ? groups : groups.slice(0, collapsedCount)
+  const hiddenCount = Math.max(0, groups.length - collapsedCount)
+  const title = groups.map((rate) => `${rate.model_name} · ${formatRatio(rate.ratio)}`).join("\n")
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle className="text-base font-medium">{"分组"}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {loading ? "正在加载全部渠道分组" : `${rows.length} 个分组 · ${channelCount} 个渠道`}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索渠道、分组或倍率"
-              className="h-9 pl-8 text-xs"
-            />
-          </div>
-          <Select value={sortMode} onValueChange={(value) => setSortMode(value as GroupSortMode)}>
-            <SelectTrigger className="h-9 w-full gap-2 text-xs sm:w-40">
-              <ArrowUpDown className="size-4 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value="channel-asc">{"渠道 A-Z"}</SelectItem>
-              <SelectItem value="channel-desc">{"渠道 Z-A"}</SelectItem>
-              <SelectItem value="ratio-asc">{"倍率从低到高"}</SelectItem>
-              <SelectItem value="ratio-desc">{"倍率从高到低"}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <ScrollArea className="h-[60vh] rounded-md border">
-          <Table className="text-xs">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="h-9 font-medium text-muted-foreground">{"渠道"}</TableHead>
-                <TableHead className="h-9 font-medium text-muted-foreground">{"类型"}</TableHead>
-                <TableHead className="h-9 font-medium text-muted-foreground">{"分组"}</TableHead>
-                <TableHead className="h-9 text-right font-medium text-muted-foreground">{"倍率"}</TableHead>
-                <TableHead className="h-9 text-right font-medium text-muted-foreground">{"更新"}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-xs text-muted-foreground">
-                    {"加载中…"}
-                  </TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-xs text-danger">
-                    {error}
-                  </TableCell>
-                </TableRow>
-              ) : filteredRows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-xs text-muted-foreground">
-                    {rows.length === 0 ? "暂无分组数据" : "没有匹配的分组"}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredRows.map(({ key, channel, rate }) => (
-                  <TableRow key={key}>
-                    <TableCell>{channel.name}</TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-normal ring-1 ring-inset",
-                          channel.type === "newapi"
-                            ? "bg-brand/10 text-brand ring-brand/20"
-                            : "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
-                        )}
-                      >
-                        {channelTypeLabel(channel.type)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="min-w-60 whitespace-normal">
-                      <div>{rate.model_name}</div>
-                      {rate.description ? (
-                        <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {rate.description}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      <span className={cn("rounded px-1.5 py-0.5 ring-1 ring-inset", ratioTone(rate.ratio))}>
-                        {formatRatio(rate.ratio)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {relativeTime(rate.last_seen_at)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
+    <div className={cn(groupBoxClass, expanded && "h-auto max-h-[12rem] overflow-y-auto")} title={expanded ? undefined : title}>
+      {visible.map((rate) => (
+        <span
+          key={rate.id}
+          className={cn(
+            "inline-flex max-w-[132px] items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset",
+            ratioTone(),
+          )}
+        >
+          <span className="truncate font-medium">{rate.model_name}</span>
+          <span className="shrink-0 font-medium tabular-nums text-foreground/70">{formatRatio(rate.ratio)}</span>
+        </span>
+      ))}
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          className="inline-flex items-center gap-0.5 rounded bg-foreground/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-foreground ring-1 ring-inset ring-foreground/15 transition-colors hover:bg-foreground/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={expanded}
+          aria-label={expanded ? `收起 ${hiddenCount} 个分组` : `展开另外 ${hiddenCount} 个分组`}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "收起" : `+${hiddenCount}`}
+          <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
+        </button>
+      ) : null}
+    </div>
   )
+}
+
+interface ChannelAPIKeyDialogState {
+  channel: Channel
+  initialAction?: ChannelAPIKeyInitialAction
 }
 
 interface ChannelSyncState {
@@ -537,19 +504,19 @@ function SyncProgressStrip({ state }: { state: ChannelSyncState }) {
   )
 }
 
-export function ChannelCards() {
+export function ChannelCards({ favoriteOnly = false }: { favoriteOnly?: boolean }) {
   const navigate = useNavigate()
   const { data: channels, loading: channelsLoading } = useChannels()
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<ChannelPageSize>(9)
+  const [pageSize, setPageSize] = useState<ChannelPageSize>("all")
   const pageQuery = useChannelsPage(page, pageSize === "all" ? -1 : pageSize)
   const refresh = useTriggerRefresh()
+  const refreshTick = useRefreshTick()
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
   const [creating, setCreating] = useState(false)
   const [preferCredentialMode, setPreferCredentialMode] = useState<CredentialMode | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [groupsOpen, setGroupsOpen] = useState(false)
   const [errorFilter, setErrorFilter] = useState<"all" | "failed" | ChannelErrorKind>(() => {
     if (typeof window === "undefined") return "all"
     try {
@@ -576,6 +543,47 @@ export function ChannelCards() {
       return false
     }
   })
+  const [viewMode, setViewMode] = useState<ChannelViewMode>(() => {
+    if (typeof window === "undefined") return "cards"
+    try {
+      return window.localStorage.getItem("uh_channel_view_mode") === "cards" ? "cards" : "list"
+    } catch {
+      return "cards"
+    }
+  })
+  const [channelSort, setChannelSort] = useState<ChannelSortState>(null)
+  const usageRange = useMemo(() => usageDateRange(7), [])
+  const [usageSummary, setUsageSummary] = useState<UpstreamUsageResponse | null>(null)
+  const [usageSummaryLoading, setUsageSummaryLoading] = useState(false)
+
+  useEffect(() => {
+    if (viewMode !== "list" || !channels?.length) return
+    let cancelled = false
+    const params = new URLSearchParams({
+      start_date: usageRange.start,
+      end_date: usageRange.end,
+      cache_only: "true",
+    })
+    setUsageSummaryLoading(true)
+    apiFetch<UpstreamUsageResponse>(`/channels/usage-analytics?${params}`)
+      .then((response) => {
+        if (!cancelled) setUsageSummary(response)
+      })
+      .catch(() => {
+        if (!cancelled) setUsageSummary(null)
+      })
+      .finally(() => {
+        if (!cancelled) setUsageSummaryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [channels?.length, refreshTick, usageRange.end, usageRange.start, viewMode])
+
+  const usageByChannel = useMemo(
+    () => new Map((usageSummary?.channels ?? []).map((item) => [item.channel_id, item])),
+    [usageSummary?.channels],
+  )
 
   useEffect(() => {
     try {
@@ -593,6 +601,14 @@ export function ChannelCards() {
     }
   }, [compactCards])
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("uh_channel_view_mode", viewMode)
+    } catch {
+      /* ignore */
+    }
+  }, [viewMode])
+
   function openCreate() {
     setEditing(null)
     setPreferCredentialMode(null)
@@ -604,9 +620,18 @@ export function ChannelCards() {
     setPreferCredentialMode(mode ?? null)
     setCreating(true)
   }
+
+  function toggleChannelSort(key: ChannelSortKey) {
+    setChannelSort((current) => {
+      if (!current || current.key !== key) return { key, direction: "asc" }
+      if (current.direction === "asc") return { key, direction: "desc" }
+      return null
+    })
+  }
+
   const [redeeming, setRedeeming] = useState<Channel | null>(null)
   const [recharging, setRecharging] = useState<Channel | null>(null)
-  const [managingKeys, setManagingKeys] = useState<Channel | null>(null)
+  const [apiKeyDialog, setAPIKeyDialog] = useState<ChannelAPIKeyDialogState | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [batchRecoveryRunning, setBatchRecoveryRunning] = useState(false)
   const [batchRecoveryResults, setBatchRecoveryResults] = useState<BatchRecoveryResult[] | null>(null)
@@ -636,13 +661,26 @@ export function ChannelCards() {
     if (errorFilter === "failed") return failedChannels
     return failedChannels.filter((c) => classifyChannelError(c.last_error).kind === errorFilter)
   }, [errorFilter, failedChannels])
-  const filterActive = filteredByError != null
+  const favoriteChannels = useMemo(
+    () => allChannels.filter((channel) => channel.favorite),
+    [allChannels],
+  )
+  const filteredChannels = useMemo(() => {
+    if (!favoriteOnly) return filteredByError
+    if (errorFilter === "all") return favoriteChannels
+    if (errorFilter === "failed") return favoriteChannels.filter((channel) => channel.last_error)
+    return favoriteChannels.filter(
+      (channel) =>
+        channel.last_error && classifyChannelError(channel.last_error).kind === errorFilter,
+    )
+  }, [errorFilter, favoriteChannels, favoriteOnly, filteredByError])
+  const filterActive = favoriteOnly || filteredChannels != null
   const failFirst = errorFilter === "all"
   const visibleChannels = useMemo(() => {
     const base = filterActive
-      ? (filteredByError as Channel[])
+      ? (filteredChannels as Channel[])
       : (channelPage?.items ?? [])
-    if (!failFirst || filterActive) return base
+    if (!failFirst || filterActive || channelSort) return base
     // When showing paged "all", still surface failed channels first within the page.
     return [...base].sort((a, b) => {
       const af = a.last_error ? 0 : 1
@@ -650,9 +688,9 @@ export function ChannelCards() {
       if (af !== bf) return af - bf
       return (b.sort_order ?? 0) - (a.sort_order ?? 0)
     })
-  }, [filterActive, filteredByError, channelPage?.items, failFirst])
+  }, [channelSort, filterActive, filteredChannels, channelPage?.items, failFirst])
   const totalChannels = filterActive
-    ? filteredByError!.length
+    ? filteredChannels!.length
     : (channelPage?.total ?? 0)
   const pageSizeAll = pageSize === "all" || filterActive
   const totalPages = pageSizeAll ? 1 : (channelPage?.pages ?? 1)
@@ -660,6 +698,27 @@ export function ChannelCards() {
   const effectivePageSize = pageSizeAll ? Math.max(totalChannels, 1) : pageSize
   const rangeStart = totalChannels === 0 ? 0 : (currentPage - 1) * effectivePageSize + 1
   const rangeEnd = Math.min((currentPage - 1) * effectivePageSize + visibleChannels.length, totalChannels)
+  const rateSummaries = useChannelRateSummaries(visibleChannels.map((channel) => channel.id))
+  const ratesByChannel = useMemo(() => {
+    const result = new Map<number, RateSnapshot[]>()
+    for (const rate of rateSummaries.data ?? []) {
+      const rates = result.get(rate.channel_id) ?? []
+      rates.push(rate)
+      result.set(rate.channel_id, rates)
+    }
+    return result
+  }, [rateSummaries.data])
+  const sortedChannels = useMemo(() => {
+    if (!channelSort) return visibleChannels
+    return [...visibleChannels].sort((a, b) => {
+      const result = compareChannelSortValues(
+        channelSortValue(a, channelSort.key, usageByChannel),
+        channelSortValue(b, channelSort.key, usageByChannel),
+        channelSort.direction,
+      )
+      return result || (b.sort_order ?? 0) - (a.sort_order ?? 0)
+    })
+  }, [channelSort, usageByChannel, visibleChannels])
   const pagerNumbers = pageNumbers(currentPage, totalPages)
 
   // 成功后自动消失需要的两段定时器：先 5s 显示，再 500ms 过渡（与 strip 的 transition-opacity duration-500 对齐）。
@@ -916,7 +975,7 @@ export function ChannelCards() {
     }
     const ok = await confirm({
       title: `确认批量改密码模式？`,
-      description: `将更新 ${targets.length} 个渠道的 credential_mode=password。密码仅发往本机 UpstreamOps API。`,
+      description: `将更新 ${targets.length} 个渠道的 credential_mode=password。密码仅发往本机 API。`,
       confirmLabel: "确认写入",
       destructive: true,
     })
@@ -962,6 +1021,17 @@ export function ChannelCards() {
     toast.message(`批量改密码完成：成功 ${okN}，失败 ${failN}`)
     setErrorFilter("failed")
     refresh()
+  }
+
+  async function setFavorite(channel: Channel) {
+    const favorite = !channel.favorite
+    await withBusy(`favorite-${channel.id}`, async () => {
+      await apiFetch<Channel>(`/channels/${channel.id}/favorite`, {
+        method: "PUT",
+        body: JSON.stringify({ favorite }),
+      })
+      toast.success(favorite ? `已收藏 ${channel.name}` : `已取消收藏 ${channel.name}`)
+    })
   }
 
   async function withBusy(key: string, fn: () => Promise<unknown>) {
@@ -1011,12 +1081,38 @@ export function ChannelCards() {
           </ul>
         </div>
       ) : null}
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-baseline gap-3">
-          <h2 className="text-base font-semibold text-foreground">{"渠道"}</h2>
-          <p className="text-xs text-muted-foreground">{"实时健康、余额与同步状态"}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2 sm:gap-3">
+          <div
+            className="inline-flex items-center rounded-lg border border-border bg-muted/40 p-0.5"
+            role="group"
+            aria-label="渠道范围"
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 rounded-md px-2.5 text-xs",
+                !favoriteOnly && "bg-background text-foreground shadow-sm",
+              )}
+              onClick={() => navigate("/ops/channels")}
+            >
+              全部
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 gap-1 rounded-md px-2.5 text-xs",
+                favoriteOnly && "bg-background text-foreground shadow-sm",
+              )}
+              onClick={() => navigate("/ops/channels?scope=favorites")}
+            >
+              <Star className={cn("size-3", favoriteOnly && "fill-amber-400 text-amber-500")} />
+              收藏 {favoriteChannels.length}
+            </Button>
+          </div>
           <span className="text-xs text-muted-foreground">
             {filterActive
               ? `筛选 ${totalChannels} / 全部 ${allChannels.length}`
@@ -1024,15 +1120,55 @@ export function ChannelCards() {
             {failedChannels.length > 0 ? ` · 失败 ${failedChannels.length}` : ""}
             {errorFilter === "all" ? " · 失败优先" : ""}
           </span>
-          <Button
-            variant={compactCards ? "default" : "outline"}
-            size="sm"
-            className="h-8 gap-1.5 px-2 text-xs"
-            onClick={() => setCompactCards((v) => !v)}
-            title="切换卡片密度"
+          <div
+            className="inline-flex h-8 items-center rounded-lg border border-border bg-muted/40 p-0.5"
+            role="group"
+            aria-label="渠道视图"
           >
-            {compactCards ? "紧凑" : "舒适"}
-          </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 gap-1 rounded-md px-2 text-xs",
+                viewMode === "cards" && "bg-background text-foreground shadow-sm",
+              )}
+              aria-label="卡片"
+              aria-pressed={viewMode === "cards"}
+              onClick={() => setViewMode("cards")}
+              title="卡片视图"
+            >
+              <Grid2X2 className="size-3.5" />
+              <span className="hidden 2xl:inline">卡片</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 gap-1 rounded-md px-2 text-xs",
+                viewMode === "list" && "bg-background text-foreground shadow-sm",
+              )}
+              aria-label="列表"
+              aria-pressed={viewMode === "list"}
+              onClick={() => setViewMode("list")}
+              title="列表视图"
+            >
+              <List className="size-3.5" />
+              <span className="hidden 2xl:inline">列表</span>
+            </Button>
+          </div>
+          {viewMode === "cards" ? (
+            <Button
+              variant={compactCards ? "default" : "outline"}
+              size="sm"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={() => setCompactCards((v) => !v)}
+              title="切换卡片密度"
+            >
+              {compactCards ? "紧凑" : "舒适"}
+            </Button>
+          ) : null}
           <Select
             value={errorFilter}
             onValueChange={(v) => {
@@ -1040,7 +1176,7 @@ export function ChannelCards() {
               setPage(1)
             }}
           >
-            <SelectTrigger className="h-8 w-[140px] text-xs">
+            <SelectTrigger className="h-8 w-[128px] text-xs">
               <SelectValue placeholder="状态筛选" />
             </SelectTrigger>
             <SelectContent align="end">
@@ -1103,16 +1239,6 @@ export function ChannelCards() {
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
-            disabled={channelsLoading || allChannels.length === 0}
-            onClick={() => setGroupsOpen(true)}
-          >
-            <Tags className="size-3.5" />
-            {"分组"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs"
             onClick={() => setImportOpen(true)}
           >
             <FileUp className="size-3.5" />
@@ -1126,35 +1252,423 @@ export function ChannelCards() {
             <Plus className="size-3.5" />
             {"新增"}
           </Button>
-        </div>
       </div>
 
-      {pageQuery.loading && !channelPage ? (
+      {(pageQuery.loading && !channelPage) || (favoriteOnly && channelsLoading && !channels) ? (
         <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
           {"加载中…"}
         </p>
       ) : totalChannels === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
-          <p className="text-sm font-medium text-foreground">{"还没有任何渠道"}</p>
+          <p className="text-sm font-medium text-foreground">
+            {favoriteOnly
+              ? errorFilter === "all"
+                ? "还没有收藏渠道"
+                : "没有符合当前状态筛选的收藏渠道"
+              : "还没有任何渠道"}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {"可手动新增，或从 all-api-hub 备份 JSON 一键导入。"}
+            {favoriteOnly
+              ? "点渠道卡片右上角的星星，把重点渠道收藏到这里。"
+              : "可手动新增，或从 all-api-hub 备份 JSON 一键导入。"}
           </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            <Button size="sm" className="gap-1.5" onClick={openCreate}>
-              <Plus className="size-3.5" />
-              {"添加第一个渠道"}
-            </Button>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setImportOpen(true)}>
-              <FileUp className="size-3.5" />
-              {"导入备份"}
-            </Button>
-            <Button size="sm" variant="ghost" className="gap-1.5 text-xs" onClick={() => navigate("/settings")}>
-              {"查看设置 / 备份说明"}
-            </Button>
+            {favoriteOnly ? (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate("/ops/channels")}>
+                查看全部渠道
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" className="gap-1.5" onClick={openCreate}>
+                  <Plus className="size-3.5" />
+                  {"添加第一个渠道"}
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setImportOpen(true)}>
+                  <FileUp className="size-3.5" />
+                  {"导入备份"}
+                </Button>
+                <Button size="sm" variant="ghost" className="gap-1.5 text-xs" onClick={() => navigate("/settings")}>
+                  {"查看设置 / 备份说明"}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       ) : (
         <>
+          {viewMode === "list" ? (
+            <Card className="border border-border p-0 shadow-none">
+              <Table data-testid="channel-list-table" className="min-w-[1560px] table-fixed">
+                <colgroup>
+                  <col className="w-[3%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[8%]" />
+                </colgroup>
+                <TableHeader className="bg-muted/45 text-[11px] text-muted-foreground [&_th]:px-3">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-10 w-11"><span className="sr-only">收藏</span></TableHead>
+                    <TableHead className="h-10 font-semibold">渠道</TableHead>
+                    <TableHead className="h-10 bg-muted/35 text-center font-semibold">状态</TableHead>
+                    <TableHead className="h-10 bg-muted/35 font-semibold">分组</TableHead>
+                    <SortableChannelHead
+                      sortKey="balance"
+                      label="余额"
+                      sortState={channelSort}
+                      onSort={toggleChannelSort}
+                      className="bg-brand/5 text-center font-semibold"
+                    >
+                      余额
+                    </SortableChannelHead>
+                    <SortableChannelHead
+                      sortKey="actualPrice"
+                      label="实际单价"
+                      sortState={channelSort}
+                      onSort={toggleChannelSort}
+                      className="bg-brand/5 text-center font-semibold leading-tight"
+                    >
+                      <span className="leading-tight">
+                        <span className="block">实际单价</span>
+                        <span className="font-normal opacity-70">$/百万 · $/次</span>
+                      </span>
+                    </SortableChannelHead>
+                    <SortableChannelHead
+                      sortKey="usage"
+                      label="7 日用量"
+                      sortState={channelSort}
+                      onSort={toggleChannelSort}
+                      className="text-center font-medium text-muted-foreground leading-tight"
+                    >
+                      <span className="leading-tight">
+                        <span className="block">7 日用量</span>
+                        <span className="font-normal opacity-70">Token / 请求</span>
+                      </span>
+                    </SortableChannelHead>
+                    <SortableChannelHead
+                      sortKey="latency"
+                      label="平均耗时"
+                      sortState={channelSort}
+                      onSort={toggleChannelSort}
+                      className="text-center font-medium text-muted-foreground"
+                    >
+                      平均耗时
+                    </SortableChannelHead>
+                    <SortableChannelHead
+                      sortKey="todayCost"
+                      label="今日消费"
+                      sortState={channelSort}
+                      onSort={toggleChannelSort}
+                      className="text-center font-medium text-muted-foreground"
+                    >
+                      今日消费
+                    </SortableChannelHead>
+                    <TableHead className="h-10 font-medium text-muted-foreground">最近更新</TableHead>
+                    <TableHead className="sticky right-0 z-20 border-l border-border bg-muted text-center">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedChannels.map((c) => {
+                    const status = statusOf(c)
+                    const meta = statusMap[status]
+                    const statusLabel = status === "failed" ? failedStatusLabel(c) : meta.label
+                    const errInfo = classifyChannelError(c.last_error)
+                    const extra = parseChannelExtra(c.login_extra_params)
+                    const channelSync = syncState[c.id]
+                    const usage = usageByChannel.get(c.id)
+                    const usageMetrics = usage && hasUsagePriceSample(usage.totals) ? usageUnitMetrics(usage.totals) : null
+                    const hasDurationSample = usage != null && hasUsageDurationSample(usage.totals)
+                    return (
+                      <TableRow
+                        key={c.id}
+                        className="group hover:bg-muted/45"
+                      >
+                        <TableCell className="px-3">
+                          <Tooltip delayDuration={150}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className={cn(
+                                  "size-7 text-muted-foreground hover:text-amber-500",
+                                  c.favorite && "text-amber-500",
+                                )}
+                                disabled={busyAction === `favorite-${c.id}`}
+                                aria-label={c.favorite ? `取消收藏 ${c.name}` : `收藏 ${c.name}`}
+                                aria-pressed={c.favorite}
+                                onClick={() => void setFavorite(c)}
+                              >
+                                {busyAction === `favorite-${c.id}` ? (
+                                  <Loader2 className="size-3.5 animate-spin" />
+                                ) : (
+                                  <Star className={cn("size-3.5", c.favorite && "fill-amber-400")} />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">
+                              {c.favorite ? "取消收藏" : "收藏渠道"}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span
+                                  className="inline-flex shrink-0 items-center rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border"
+                                >
+                                  {channelTypeLabel(c.type)}
+                                </span>
+                                {extra.source ? (
+                                  <span className="max-w-24 truncate rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground ring-1 ring-inset ring-border" title={extra.source}>
+                                    {extra.source}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 flex min-w-0 items-center gap-1">
+                                <a
+                                  href={c.site_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="max-w-[220px] truncate font-semibold text-foreground hover:text-brand hover:underline"
+                                  title={c.name}
+                                >
+                                  {c.name}
+                                </a>
+                                <Button
+                                  asChild
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="size-5 shrink-0 text-muted-foreground opacity-60 hover:text-foreground group-hover:opacity-100"
+                                >
+                                  <a href={c.site_url} target="_blank" rel="noopener noreferrer" aria-label={`新窗口打开 ${c.name} 站点地址`}>
+                                    <ExternalLink className="size-3.5" />
+                                  </a>
+                                </Button>
+                              </div>
+                              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                                {extra.tagIds.slice(0, 2).map((tag) => (
+                                  <span key={tag} className="max-w-20 truncate rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground ring-1 ring-inset ring-border" title={tag}>
+                                    {tag}
+                                  </span>
+                                ))}
+                                {extra.notesPreview ? (
+                                  <span className="max-w-36 truncate" title={extra.notesPreview}>{extra.notesPreview}</span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="overflow-hidden px-2 py-2 text-center">
+                          <div className="mx-auto flex min-w-0 max-w-40 flex-col items-center gap-1">
+                            <div className="flex flex-wrap items-center justify-center gap-1">
+                              {channelSync?.running ? <Loader2 className="size-3.5 animate-spin text-brand" /> : null}
+                              <span className={cn("inline-flex min-w-16 items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", meta.cls)}>
+                                {statusLabel}
+                              </span>
+                              {!c.monitor_enabled ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
+                                  已暂停
+                                </span>
+                              ) : null}
+                            </div>
+                          {c.last_error ? (
+                            <Tooltip delayDuration={150}>
+                              <TooltipTrigger asChild>
+                                <p className="max-w-full truncate text-[10px] leading-4 text-danger/80">
+                                  {errInfo.hint || c.last_error}
+                                </p>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap text-xs">
+                                {c.last_error}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : channelSync?.latest?.message ? (
+                            <p className="max-w-full truncate text-[10px] leading-4 text-muted-foreground" title={channelSync.latest.message}>
+                              {channelSync.latest.message}
+                            </p>
+                          ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="overflow-hidden bg-muted/10 py-2 align-middle">
+                          <ChannelListGroups
+                            rates={ratesByChannel.get(c.id)}
+                            loading={rateSummaries.loading}
+                            emptyLabel={c.last_error ? "未采集倍率" : undefined}
+                          />
+                        </TableCell>
+                        <TableCell className="bg-brand/5 py-2 text-center font-semibold tabular-nums">
+                          <Tooltip delayDuration={150}>
+                            <TooltipTrigger asChild><span>{money(c.last_balance)}</span></TooltipTrigger>
+                            <TooltipContent side="top" className="text-xs">{rechargeMultiplierTip(c)}</TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell className="bg-brand/5 py-2 text-center font-semibold tabular-nums">
+                          {usageMetrics ? (
+                            <>
+                              <div className="font-semibold text-foreground">{money(usageMetrics.actualPerMillion, { precise: true })}</div>
+                              <div className="mt-0.5 text-[10px] text-muted-foreground">{money(usageMetrics.actualPerRequest, { precise: true })} / 次</div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">{usageSummaryLoading ? "…" : "—"}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-2 text-center tabular-nums">
+                          {usage ? (
+                            <>
+                              <div className="font-medium text-foreground">{formatTokens(usage.totals.total_tokens)}</div>
+                              <div className="mt-0.5 text-[10px] text-muted-foreground">{usage.totals.requests.toLocaleString("zh-CN")} 次</div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">{usageSummaryLoading ? "…" : "—"}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-2 text-center font-medium tabular-nums">
+                          {hasDurationSample ? formatDurationMS(usage.totals.average_duration_ms) : usage ? "—" : usageSummaryLoading ? "…" : "—"}
+                        </TableCell>
+                        <TableCell className="py-2 text-center tabular-nums">
+                          <div className="font-medium text-foreground">{money(c.today_cost)}</div>
+                          <div className="mt-0.5 text-[10px] text-muted-foreground">累计 {money(c.total_cost)}</div>
+                        </TableCell>
+                        <TableCell className="py-2 text-xs text-muted-foreground">
+                          {relativeTime(c.last_balance_at ?? c.updated_at)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "sticky right-0 z-10 border-l border-border px-3",
+                            "bg-background group-hover:bg-muted",
+                          )}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <Tooltip delayDuration={150}>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="icon-sm"
+                                  className="size-7"
+                                  aria-label={`同步 ${c.name}`}
+                                  disabled={!!channelSync?.running || anySyncRunning}
+                                  onClick={() => startStream(c, "sync")}
+                                >
+                                  <RefreshCw className={cn("size-3.5", channelSync?.running && "animate-spin")} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">同步渠道</TooltipContent>
+                            </Tooltip>
+                            <Tooltip delayDuration={150}>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="icon-sm"
+                                  className="size-7"
+                                  aria-label={`测试 ${c.name}`}
+                                  disabled={!!channelSync?.running || anySyncRunning}
+                                  onClick={() => startStream(c, "test-login")}
+                                >
+                                  <LogIn className="size-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">测试登录</TooltipContent>
+                            </Tooltip>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="size-7"
+                              aria-label={`编辑 ${c.name}`}
+                              onClick={() => openEdit(c)}
+                            >
+                              <Pencil className="size-3.5" />
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="size-7"
+                                  aria-label={`${c.name} 更多操作`}
+                                  disabled={busyAction === `clear-login-${c.id}` || busyAction === `delete-${c.id}`}
+                                >
+                                  <MoreHorizontal className="size-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuItem onSelect={() => setRecharging(c)}>
+                                  <CreditCard className="size-3.5" />充值
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => setRedeeming(c)}>
+                                  <Gift className="size-3.5" />兑换
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => setAPIKeyDialog({ channel: c })}>
+                                  <KeyRound className="size-3.5" />密钥
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  disabled={busyAction === `toggle-${c.id}`}
+                                  onSelect={(e) => {
+                                    e.preventDefault()
+                                    void withBusy(`toggle-${c.id}`, () =>
+                                      apiFetch(`/channels/${c.id}/${c.monitor_enabled ? "disable" : "enable"}`, { method: "POST" }),
+                                    )
+                                  }}
+                                >
+                                  {c.monitor_enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                                  {c.monitor_enabled ? "暂停监控" : "恢复监控"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={busyAction === `clear-login-${c.id}`}
+                                  onSelect={async (e) => {
+                                    e.preventDefault()
+                                    const ok = await confirm({
+                                      title: `清空 ${c.name} 的登录信息？`,
+                                      description: "将清空缓存会话；Token 模式还会清空已保存的 Access Token、Refresh Token 和 NewAPI Cookie。账号密码本身不会删除。",
+                                      confirmLabel: "清空",
+                                      destructive: true,
+                                    })
+                                    if (!ok) return
+                                    void withBusy(`clear-login-${c.id}`, async () => {
+                                      await apiFetch(`/channels/${c.id}/clear-login-info`, { method: "POST" })
+                                      toast.success("已清空登录信息")
+                                    })
+                                  }}
+                                >
+                                  <XCircle className="size-3.5" />清空登录信息
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  disabled={busyAction === `delete-${c.id}`}
+                                  onSelect={async (e) => {
+                                    e.preventDefault()
+                                    const ok = await confirm({
+                                      title: `删除渠道 ${c.name}？`,
+                                      description: "删除后该渠道的余额历史、倍率快照与登录凭据都将一并清除，且无法恢复。",
+                                      confirmLabel: "删除",
+                                      destructive: true,
+                                    })
+                                    if (!ok) return
+                                    void withBusy(`delete-${c.id}`, () => apiFetch(`/channels/${c.id}`, { method: "DELETE" }))
+                                  }}
+                                >
+                                  <Trash2 className="size-3.5" />删除
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+          ) : (
           <div
             className={cn(
               "grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3",
@@ -1180,12 +1694,7 @@ export function ChannelCards() {
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-semibold text-foreground">{c.name}</span>
                       <span
-                        className={cn(
-                          "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-                          c.type === "newapi"
-                            ? "bg-brand/10 text-brand ring-brand/20"
-                            : "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300",
-                        )}
+                        className="inline-flex items-center rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border"
                       >
                         {channelTypeLabel(c.type)}
                       </span>
@@ -1202,7 +1711,7 @@ export function ChannelCards() {
                       {extra.tagIds.slice(0, 3).map((tag) => (
                         <span
                           key={tag}
-                          className="inline-flex max-w-[6rem] truncate items-center rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-700 ring-1 ring-inset ring-violet-500/20 dark:text-violet-300"
+                          className="inline-flex max-w-[6rem] truncate items-center rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground ring-1 ring-inset ring-border"
                           title={tag}
                         >
                           {tag}
@@ -1210,6 +1719,32 @@ export function ChannelCards() {
                       ))}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
+                      <Tooltip delayDuration={150}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className={cn(
+                              "size-7 text-muted-foreground hover:text-amber-500",
+                              c.favorite && "text-amber-500",
+                            )}
+                            disabled={busyAction === `favorite-${c.id}`}
+                            aria-label={c.favorite ? `取消收藏 ${c.name}` : `收藏 ${c.name}`}
+                            aria-pressed={c.favorite}
+                            onClick={() => void setFavorite(c)}
+                          >
+                            {busyAction === `favorite-${c.id}` ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Star className={cn("size-3.5", c.favorite && "fill-amber-400")} />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          {c.favorite ? "取消收藏" : "收藏渠道"}
+                        </TooltipContent>
+                      </Tooltip>
                       <div className="text-right text-[10px] leading-4 text-muted-foreground">
                         <p>{relativeTime(c.last_balance_at ?? c.updated_at)}</p>
                       </div>
@@ -1282,9 +1817,9 @@ export function ChannelCards() {
                     </StatTile>
                     <ChannelSubscriptionUsageMetricTiles channel={c} />
                     {c.last_error ? (
-                      <div className="col-span-3 space-y-1.5 rounded-md border border-danger/25 bg-danger/5 px-2.5 py-2">
+                      <div className="col-span-3 space-y-1.5 rounded-md border border-border bg-muted/20 px-2.5 py-2">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="inline-flex items-center rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-medium text-danger ring-1 ring-inset ring-danger/20">
+                          <span className="inline-flex items-center rounded bg-transparent px-1.5 py-0.5 text-[10px] font-medium text-danger ring-1 ring-inset ring-danger/30">
                             {errInfo.label || "登录失败"}
                           </span>
                           {errInfo.hint ? (
@@ -1338,7 +1873,7 @@ export function ChannelCards() {
                     ) : null}
                   </div>
 
-                  <InlineRates channelID={c.id} />
+                  <InlineRates rates={ratesByChannel.get(c.id)} loading={rateSummaries.loading} />
 
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <Button
@@ -1385,7 +1920,7 @@ export function ChannelCards() {
                       variant="outline"
                       size="sm"
                       className="gap-1 text-xs"
-                      onClick={() => setManagingKeys(c)}
+                      onClick={() => setAPIKeyDialog({ channel: c })}
                     >
                       <KeyRound className="size-3" />
                       {"密钥"}
@@ -1485,6 +2020,7 @@ export function ChannelCards() {
               )
             })}
           </div>
+          )}
 
           <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-muted-foreground">
@@ -1600,12 +2136,6 @@ export function ChannelCards() {
         }}
       />
 
-      <ChannelGroupsDialog
-        open={groupsOpen}
-        onOpenChange={setGroupsOpen}
-        channels={channels ?? []}
-      />
-
       <ChannelRedeemDialog
         open={redeeming != null}
         onOpenChange={(v) => {
@@ -1626,11 +2156,12 @@ export function ChannelCards() {
       />
 
       <ChannelAPIKeysDialog
-        open={managingKeys != null}
+        open={apiKeyDialog != null}
         onOpenChange={(v) => {
-          if (!v) setManagingKeys(null)
+          if (!v) setAPIKeyDialog(null)
         }}
-        channel={managingKeys}
+        channel={apiKeyDialog?.channel ?? null}
+        initialAction={apiKeyDialog?.initialAction}
       />
 
       {confirmDialog}

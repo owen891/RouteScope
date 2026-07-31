@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Bell,
+  ListChecks,
+  Megaphone,
   Clock3,
   RefreshCw,
   KeyRound,
@@ -66,12 +68,53 @@ const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string }> = 
   subscription_monthly_remaining_low: { icon: AlertTriangle, cls: "text-warning" },
   subscription_expiring: { icon: Clock3, cls: "text-warning" },
   upstream_sync_group_changed: { icon: RefreshCw, cls: "text-brand" },
+  adjustment_executed: { icon: ArrowUpRight, cls: "text-brand" },
+  adjustment_rolled_back: { icon: RefreshCw, cls: "text-warning" },
 }
 
 const FEED_PREVIEW_SIZE = 10
 const FEED_DIALOG_SIZE = 20
 
-export function AlertFeed() {
+type ActivityPanelVariant = "default" | "activity"
+
+function PanelState({
+  loading,
+  error,
+  empty,
+  onRetry,
+  className,
+}: {
+  loading: boolean
+  error: string | null
+  empty: string
+  onRetry: () => void
+  className?: string
+}) {
+  if (loading) {
+    return (
+      <p className={cn("px-6 py-8 text-sm text-muted-foreground", className)} aria-busy="true">
+        加载中...
+      </p>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className={cn("flex flex-col items-start gap-2 px-6 py-6", className)} role="alert">
+        <p className="text-sm text-destructive">读取失败：{error}</p>
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onRetry}>
+          <RefreshCw className="size-3.5" />
+          重试
+        </Button>
+      </div>
+    )
+  }
+
+  return <p className={cn("px-6 py-8 text-sm text-muted-foreground", className)}>{empty}</p>
+}
+
+export function AlertFeed({ variant = "default" }: { variant?: ActivityPanelVariant }) {
+  const isActivity = variant === "activity"
   const [detailOpen, setDetailOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [feed, setFeed] = useState<NotificationLog[]>([])
@@ -129,9 +172,22 @@ export function AlertFeed() {
 
   return (
     <>
-      <Card className="border border-border shadow-none lg:h-100">
-        <CardHeader className="flex shrink-0 flex-col gap-2 px-4 pb-2 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <CardTitle className="text-base font-semibold">{"告警动态"}</CardTitle>
+      <Card className={cn(
+        "border border-border py-4 shadow-none sm:py-6",
+        isActivity && "h-full min-h-0 overflow-hidden rounded-lg bg-card/90 py-0",
+      )}>
+        <CardHeader className={cn(
+          "flex shrink-0 flex-col gap-2 px-4 pb-2 sm:flex-row sm:items-center sm:justify-between sm:px-6",
+          isActivity && "border-b border-border bg-muted/20 px-5 py-4 sm:px-5",
+        )}>
+          <div className="flex items-center gap-3">
+            {isActivity ? (
+              <span className="flex size-8 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <ListChecks className="size-4" aria-hidden="true" />
+              </span>
+            ) : null}
+            <CardTitle className="text-base font-semibold">{"告警记录"}</CardTitle>
+          </div>
           <div className="flex items-center gap-3 self-start sm:self-auto">
             <span className="text-xs text-muted-foreground">
               {preview.data?.total ? `共 ${preview.data.total} 条` : ""}
@@ -141,13 +197,20 @@ export function AlertFeed() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="min-h-0 flex-1 px-0">
-          {preview.loading ? (
-            <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p>
-          ) : items.length === 0 ? (
-            <p className="px-6 py-4 text-xs text-muted-foreground">{"暂无告警记录"}</p>
+        <CardContent className={cn("min-h-0 flex-1 px-0", isActivity && "flex flex-col")}>
+          {preview.loading || preview.error || items.length === 0 ? (
+            <PanelState
+              loading={preview.loading}
+              error={preview.error}
+              empty="暂无告警记录"
+              onRetry={preview.refetch}
+              className={isActivity ? "flex min-h-40 flex-1 items-center px-5 py-10" : undefined}
+            />
           ) : (
-            <div className="max-h-80 overflow-y-auto overscroll-contain lg:h-full lg:max-h-none">
+            <div className={cn(
+              "sm:max-h-80 sm:overflow-y-auto sm:overscroll-contain",
+              isActivity && "min-h-0 xl:flex-1 xl:max-h-none",
+            )}>
               <ul className="divide-y divide-border">
                 {items.map((a) => {
                   const meta = eventMeta[a.event] ?? { icon: AlertTriangle, cls: "text-muted-foreground" }
@@ -181,7 +244,7 @@ export function AlertFeed() {
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{"告警动态"}</DialogTitle>
+            <DialogTitle>{"告警记录"}</DialogTitle>
           </DialogHeader>
           <div
             className="max-h-[60vh] overflow-y-auto overscroll-contain rounded-md border border-border"
@@ -255,7 +318,8 @@ export function AlertFeed() {
   )
 }
 
-export function UpstreamAnnouncements() {
+export function UpstreamAnnouncements({ variant = "default" }: { variant?: ActivityPanelVariant }) {
+  const isActivity = variant === "activity"
   const summary = useDashboardSummary()
   const preview = useAnnouncements(1, FEED_PREVIEW_SIZE)
   const [active, setActive] = useState<UpstreamAnnouncement | null>(null)
@@ -319,9 +383,22 @@ export function UpstreamAnnouncements() {
 
   return (
     <>
-      <Card className="border border-border shadow-none lg:h-100">
-        <CardHeader className="flex shrink-0 flex-col gap-2 px-4 pb-2 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <CardTitle className="text-base font-semibold">{"上游公告"}</CardTitle>
+      <Card className={cn(
+        "min-h-[24rem] border border-border py-4 shadow-none sm:py-6",
+        isActivity && "h-full min-h-0 overflow-hidden rounded-lg bg-card/90 py-0",
+      )}>
+        <CardHeader className={cn(
+          "flex shrink-0 flex-col gap-2 px-4 pb-2 sm:flex-row sm:items-center sm:justify-between sm:px-6",
+          isActivity && "border-b border-border bg-muted/20 px-5 py-4 sm:px-5",
+        )}>
+          <div className="flex items-center gap-3">
+            {isActivity ? (
+              <span className="flex size-8 items-center justify-center rounded-md bg-brand/10 text-brand">
+                <Megaphone className="size-4" aria-hidden="true" />
+              </span>
+            ) : null}
+            <CardTitle className="text-base font-semibold">{"上游公告"}</CardTitle>
+          </div>
           <div className="flex items-center gap-3 self-start sm:self-auto">
             <span className="text-xs text-muted-foreground">
               {preview.data?.total ? `共 ${preview.data.total} 条` : ""}
@@ -333,13 +410,23 @@ export function UpstreamAnnouncements() {
             ) : null}
           </div>
         </CardHeader>
-        <CardContent className="min-h-0 flex-1 px-0">
-          {preview.loading ? (
-            <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p>
-          ) : items.length === 0 ? (
-            <p className="px-6 py-4 text-xs text-muted-foreground">{"暂无上游公告"}</p>
+        <CardContent className={cn("min-h-0 flex-1 px-0", isActivity && "flex flex-col")}>
+          {preview.loading || preview.error || items.length === 0 ? (
+            <PanelState
+              loading={preview.loading}
+              error={preview.error}
+              empty="暂无上游公告"
+              onRetry={preview.refetch}
+              className={isActivity ? "flex min-h-40 flex-1 items-center px-5 py-10" : undefined}
+            />
           ) : (
-            <div className="max-h-80 overflow-y-auto overscroll-contain lg:h-full lg:max-h-none">
+              <div
+                className={cn(
+                  "sm:max-h-80 sm:overflow-y-auto sm:overscroll-contain",
+                  isActivity && "min-h-0 xl:flex-1 xl:max-h-none xl:overflow-y-auto",
+                )}
+                data-testid="announcement-preview-list"
+              >
               <ul className="divide-y divide-border">
                 {items.map((item) => {
                   const ch = channelByID.get(item.channel_id)
@@ -349,7 +436,10 @@ export function UpstreamAnnouncements() {
                     <li key={item.id}>
                       <button
                         type="button"
-                        className="block w-full px-4 py-3 text-left transition-colors hover:bg-muted/40 sm:px-6"
+                       className={cn(
+                         "block w-full text-left transition-colors hover:bg-muted/40",
+                         isActivity ? "px-5 py-4" : "px-4 py-3 sm:px-6",
+                       )}
                         onClick={() => setActive(item)}
                       >
                         <div className="mb-1.5 flex min-w-0 items-start justify-between gap-3">
@@ -544,7 +634,7 @@ export function CaptchaStatus() {
   }
 
   return (
-    <Card className="border border-border shadow-none">
+    <Card className="border border-border py-4 shadow-none sm:py-6">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base font-semibold">{"验证码服务"}</CardTitle>
         <Button
@@ -564,7 +654,10 @@ export function CaptchaStatus() {
         {loading ? (
           <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p>
         ) : !data || data.length === 0 ? (
-          <p className="px-6 py-4 text-xs text-muted-foreground">{"暂未配置打码 provider"}</p>
+          <div className="mx-6 my-2 rounded-md border border-dashed border-border px-4 py-5">
+            <p className="text-sm font-medium text-foreground">还没有验证码服务</p>
+            <p className="mt-1 text-xs text-muted-foreground">仅在渠道登录需要验证码时配置。</p>
+          </div>
         ) : (
           <ul className="divide-y divide-border">
             {data.map((p) => (
@@ -729,7 +822,7 @@ export function NotificationStatus() {
   }
 
   return (
-    <Card className="border border-border shadow-none">
+    <Card className="border border-border py-4 shadow-none sm:py-6">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base font-semibold">{"通知渠道"}</CardTitle>
         <Button
@@ -749,9 +842,13 @@ export function NotificationStatus() {
         {loading ? (
           <p className="text-xs text-muted-foreground">{"加载中…"}</p>
         ) : !data || data.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{"暂未配置通知渠道"}</p>
+          <div className="rounded-md border border-dashed border-border px-4 py-5">
+            <p className="text-sm font-medium text-foreground">还没有通知渠道</p>
+            <p className="mt-1 text-xs text-muted-foreground">新增后可测试发送并接收告警。</p>
+          </div>
         ) : (
-          <ul className="divide-y divide-border rounded-lg border border-border">
+          <>
+          <ul className="divide-y divide-border rounded-md border border-border">
             {data.map((c) => {
               const Icon = notifyTypeIcon[c.type] ?? Send
               const subCount = parseSubCount(c.subscriptions)
@@ -807,27 +904,27 @@ export function NotificationStatus() {
               )
             })}
           </ul>
+          <div className="divide-y divide-border rounded-md border border-border">
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs text-muted-foreground">{"上次发送"}</span>
+              <span className="text-xs font-medium text-foreground">
+                {lastSent ? relativeTime(lastSent.sent_at) : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs text-muted-foreground">{"近 10 条失败"}</span>
+              <span
+                className={cn(
+                  "text-xs font-semibold",
+                  recentFailed === 0 ? "text-success" : "text-danger",
+                )}
+              >
+                {recentFailed}
+              </span>
+            </div>
+          </div>
+          </>
         )}
-
-        <div className="divide-y divide-border rounded-lg border border-border">
-          <div className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-xs text-muted-foreground">{"上次发送"}</span>
-            <span className="text-xs font-medium text-foreground">
-              {lastSent ? relativeTime(lastSent.sent_at) : "—"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-xs text-muted-foreground">{"近 10 条失败"}</span>
-            <span
-              className={cn(
-                "text-xs font-semibold",
-                recentFailed === 0 ? "text-success" : "text-danger",
-              )}
-            >
-              {recentFailed}
-            </span>
-          </div>
-        </div>
       </CardContent>
 
       <NotificationFormDialog
