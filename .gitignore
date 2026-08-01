@@ -63,7 +63,8 @@ CLAUDE.md
 .planning/
 AGENTS.md
 /backups/
-docs/images/
+docs/images/*
+!docs/images/routescope-*.png
 docs/*PLAN*.md
 docs/*SPEC*.md
 docs/*AUDIT*.md
