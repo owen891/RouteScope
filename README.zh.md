@@ -20,6 +20,22 @@ RouteScope 面向单一可信运维者，把上游状态、运营记录、路由
 - **通知中心**：管理通知渠道、订阅规则、冷却时间、重试策略和发送记录。
 - **系统设置**：管理后台鉴权、代理、调度、保留策略、备份检查、Captcha、版本检查和可热更新配置。
 
+## 界面截图
+
+![RouteScope 总览](docs/images/routescope-overview-detail.png)
+
+![渠道与账号](docs/images/routescope-channels-table.png)
+
+![系统设置与数据备份](docs/images/routescope-settings-detail.png)
+
+![API 转发](docs/images/routescope-gateway-empty.png)
+
+![通知中心](docs/images/routescope-notification-dialog.png)
+
+![分组倍率对比](docs/images/routescope-comparisons.png)
+
+![真实消费](docs/images/routescope-usage.png)
+
 ## 快速启动
 
 ### Docker Compose + SQLite

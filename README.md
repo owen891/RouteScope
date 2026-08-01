@@ -20,6 +20,22 @@ RouteScope is built for a single trusted operator. It brings upstream status, op
 - **Notification center**: configures notification channels, subscriptions, cooldowns, retry behavior, and delivery history.
 - **System settings**: controls admin authentication, proxy, schedules, retention, backup checks, Captcha providers, version checks, and hot-reloadable runtime settings.
 
+## Screenshots
+
+![RouteScope overview](docs/images/routescope-overview-detail.png)
+
+![Channel and account management](docs/images/routescope-channels-table.png)
+
+![System settings and data backup](docs/images/routescope-settings-detail.png)
+
+![API relay](docs/images/routescope-gateway-empty.png)
+
+![Notification center](docs/images/routescope-notification-dialog.png)
+
+![Group rate comparisons](docs/images/routescope-comparisons.png)
+
+![Actual usage and costs](docs/images/routescope-usage.png)
+
 ## Quick Start
 
 ### Docker Compose with SQLite
