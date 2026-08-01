@@ -24,6 +24,8 @@ RouteScope 面向单一可信运维者，把上游状态、运营记录、路由
 
 ![RouteScope 总览](docs/images/routescope-overview-detail.png)
 
+![运营动态](docs/images/routescope-activity.png)
+
 ![渠道与账号](docs/images/routescope-channels-table.png)
 
 ![系统设置与数据备份](docs/images/routescope-settings-detail.png)

@@ -24,6 +24,8 @@ RouteScope is built for a single trusted operator. It brings upstream status, op
 
 ![RouteScope overview](docs/images/routescope-overview-detail.png)
 
+![Activity timeline](docs/images/routescope-activity.png)
+
 ![Channel and account management](docs/images/routescope-channels-table.png)
 
 ![System settings and data backup](docs/images/routescope-settings-detail.png)
